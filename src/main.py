@@ -1,546 +1,69 @@
-from src.main import main
-
-if __name__ == "__main__":
-    main()
-
-@dataclass
-class AppSettings:
-    hoi4_install: str = ""
-    user_mods: str = ""
-    mod_root: str = ""
-    last_mod_descriptor: str = ""
-
-def load_settings() -> AppSettings:
-    APP_DIR.mkdir(parents=True, exist_ok=True)
-    if not SETTINGS_FILE.exists():
-        return AppSettings()
-    try:
-        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        s = AppSettings()
-        for k, v in data.items():
-            if hasattr(s, k):
-                setattr(s, k, v)
-        return s
-    except Exception:
-        return AppSettings()
-
-def save_settings(s: AppSettings):
-    APP_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(asdict(s), indent=2), encoding="utf-8")
-
-@dataclass
-class HOI4Paths:
-    hoi4_install: Path
-    hoi4_user_mods: Path
-    mod_root: Path
-
-YML_ENTRY_RE = re.compile(r'^\s*([^:#\s]+)\s*:\s*(?:\d+\s*)?\s*"(.*)"\s*$')
-TAG_LINE_RE = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*".*"\s*$')
-
-def append_localisation(path: Path, entries: dict[str, str]):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text("l_english:\n", encoding="utf-8-sig")
-    raw = path.read_bytes()
-    try:
-        txt = raw.decode("utf-8-sig")
-    except Exception:
-        txt = raw.decode("utf-8", errors="ignore")
-    if not txt.strip().startswith("l_english:"):
-        txt = "l_english:\n" + txt
-    out = txt.rstrip() + "\n"
-    for k, v in entries.items():
-        out += f' {k}:0 "{v}"\n'
-    path.write_text(out, encoding="utf-8-sig")
-
-def parse_english_localisation(loc_english_dir: Path) -> dict[str, str]:
-    out: dict[str, str] = {}
-    if not loc_english_dir.exists():
-        return out
-    for f in loc_english_dir.rglob("*.yml"):
-        raw = f.read_bytes()
-        try:
-            txt = raw.decode("utf-8-sig")
-        except Exception:
-            txt = raw.decode("utf-8", errors="ignore")
-        for line in txt.splitlines():
-            if not line or line.strip().startswith("#"):
-                continue
-            if line.strip().startswith("l_"):
-                continue
-            m = YML_ENTRY_RE.match(line)
-            if m:
-                out[m.group(1)] = m.group(2)
-    return out
-
-def load_vanilla_tags(hoi4_install: Path) -> set[str]:
-    p = hoi4_install / "common/country_tags/00_countries.txt"
-    if not p.exists():
-        return set()
-    tags = set()
-    txt = p.read_text(encoding="utf-8", errors="ignore")
-    for line in txt.splitlines():
-        m = TAG_LINE_RE.match(line)
-        if m:
-            tags.add(m.group(1))
-    return tags
-
-def load_mod_tags(mod_root: Path) -> list[str]:
-    tags = set()
-    d = mod_root / "common/country_tags"
-    if not d.exists():
-        return []
-    for f in d.glob("*.txt"):
-        txt = f.read_text(encoding="utf-8", errors="ignore")
-        for line in txt.splitlines():
-            m = TAG_LINE_RE.match(line)
-            if m:
-                tags.add(m.group(1))
-    return sorted(tags)
-
-def ensure_dir(p: Path):
-    p.mkdir(parents=True, exist_ok=True)
-
-def create_mod_structure(paths: HOI4Paths):
-    ensure_dir(paths.mod_root / "common/country_tags")
-    ensure_dir(paths.mod_root / "common/countries")
-    ensure_dir(paths.mod_root / "common/national_focus")
-    ensure_dir(paths.mod_root / "common/ideas")
-    ensure_dir(paths.mod_root / "common/characters")
-    ensure_dir(paths.mod_root / "history/countries")
-    ensure_dir(paths.mod_root / "history/states")
-    ensure_dir(paths.mod_root / "history/units")
-    ensure_dir(paths.mod_root / "localisation/english")
-    ensure_dir(paths.mod_root / "gfx/flags/medium")
-    ensure_dir(paths.mod_root / "gfx/flags/small")
-    ensure_dir(paths.mod_root / "gfx/leaders")
-    ensure_dir(paths.mod_root / "events")
-    ensure_dir(paths.mod_root / "interface")
-
-def find_mods_in_user_mod_folder(user_mods_dir: Path):
-    mods = []
-    if not user_mods_dir.exists():
-        return mods
-    for f in sorted(user_mods_dir.glob("*.mod")):
-        try:
-            txt = f.read_text(encoding="utf-8", errors="ignore")
-            path = None
-            for line in txt.splitlines():
-                line = line.strip()
-                if line.startswith("path="):
-                    path = line.split("=", 1)[1].strip().strip('"')
-                    break
-            if path:
-                mods.append((f.name, Path(path)))
-        except Exception:
-            continue
-    return mods
-
-def nuclear_delete_mod(mod_root: Path, user_mods_dir: Path, descriptor_filename: str | None = None):
-    mod_root_resolved = mod_root.expanduser().resolve()
-    if len(mod_root_resolved.parts) < 4:
-        raise ValueError(f"Refusing to delete suspicious path: {mod_root_resolved}")
-    if mod_root_resolved.exists():
-        shutil.rmtree(mod_root_resolved)
-    if descriptor_filename:
-        desc = user_mods_dir / descriptor_filename
-        if desc.exists():
-            desc.unlink()
-
-def add_country_tag(mod_root: Path, tag: str) -> None:
-    p = mod_root / "common/country_tags/00_generated_tags.txt"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    line = f'{tag} = "countries/{tag}.txt"\n'
-    if p.exists() and line in p.read_text(encoding="utf-8", errors="ignore"):
-        return
-    with p.open("a", encoding="utf-8") as fh:
-        fh.write(line)
-
-def write_country_definition(mod_root: Path, tag: str, color: Tuple[int, int, int]):
-    p = mod_root / f"common/countries/{tag}.txt"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    r,g,b = color
-    p.write_text(
-        "graphical_culture = western_european_gfx\n"
-        "graphical_culture_2d = western_european_2d\n"
-        f"color = {{ {r} {g} {b} }}\n",
-        encoding="utf-8"
-    )
-
-def write_country_history(mod_root: Path, tag: str, name: str, capital_state_id: int, pops: dict, leader_name: str, leader_id: str = None):
-    """
-    Writes history/countries/<TAG> - <Name>.txt
-    Recruit the created character and set them (explicitly) as country leader.
-    """
-    if leader_id is None:
-        leader_id = f"{tag}_leader_1"
-
-    p = mod_root / f"history/countries/{tag} - {name}.txt"
-    p.parent.mkdir(parents=True, exist_ok=True)
-
-    txt = f"""capital = {capital_state_id}
-
-# recruit the character so the game knows about them (do NOT put this as the very last line)
-recruit_character = {leader_id}
-
-set_popularities = {{
- democratic = {pops.get("democratic", 0)}
- fascism = {pops.get("fascism", 0)}
- communism = {pops.get("communism", 0)}
- neutrality = {pops.get("neutrality", 0)}
-}}
-
-set_politics = {{
- ruling_party = democratic
- last_election = "1936.1.1"
- elections_allowed = yes
-}}
-
-
-# explicitly set the country leader to that character (redundant but reliable)
-set_country_leader = {{
- character = {leader_id}
-}}
 """
-    p.write_text(txt, encoding="utf-8")
+HOI4 Modding Studio - Main Application
 
-
-
-def write_localisation_country(mod_root: Path, tag: str, name: str, adj: str):
-    loc = mod_root / f"localisation/english/{tag}_country_l_english.yml"
-    loc.parent.mkdir(parents=True, exist_ok=True)
-
-    loc.write_text(
-        "l_english:\n"
-        f' {tag}:0 "{name}"\n'
-        f' {tag}_DEF:0 "{name}"\n'
-        f' {tag}_ADJ:0 "{adj}"\n',
-        encoding="utf-8-sig"
-    )
-
-
-def write_portrait_gfx(mod_root: Path, tag: str, portrait_slug: str):
-    dds = mod_root / f"gfx/leaders/{tag}/{portrait_slug}.dds"
-    tga = mod_root / f"gfx/leaders/{tag}/{portrait_slug}.tga"
-
-    if dds.exists():
-        tex = f"gfx/leaders/{tag}/{portrait_slug}.dds"
-    elif tga.exists():
-        tex = f"gfx/leaders/{tag}/{portrait_slug}.tga"
-    else:
-        tex = f"gfx/leaders/{tag}/{portrait_slug}.dds"
-
-    g = mod_root / f"interface/{tag}_portraits.gfx"
-    g.parent.mkdir(parents=True, exist_ok=True)
-
-    g.write_text(
-        "spriteTypes = {\n"
-        " spriteType = {\n"
-        f'  name = "GFX_portrait_{tag}_{portrait_slug}"\n'
-        f'  texturefile = "{tex}"\n'
-        " }\n"
-        "}\n",
-        encoding="utf-8"
-    )
-
-def write_character_file(mod_root: Path, tag: str, character_id: str, leader_name: str, portrait_slug: str, ideology: str = "liberalism"):
-    p = mod_root / f"common/characters/{tag}_characters.txt"
-    p.parent.mkdir(parents=True, exist_ok=True)
-
-    txt = f"""characters = {{
- {character_id} = {{
-  name = "{leader_name}"
-
-  roles = {{ country_leader }}
-
-  portraits = {{
-   civilian = {{
-    large = GFX_portrait_{tag}_{portrait_slug}
-   }}
-  }}
-
-  country_leader = {{
-   ideology = {ideology}
-   desc = {character_id}_desc
-   expire = "1965.1.1"
-   traits = {{ }}
-  }}
- }}
-}}
+This is the main application file for the HOI4 Modding Studio.
 """
-    p.write_text(txt, encoding="utf-8")
 
-    loc = mod_root / f"localisation/english/{character_id}_l_english.yml"
-    append_localisation(loc, {
-        f"{character_id}": leader_name,
-        f"{character_id}_desc": f"{leader_name} (leader)"
-    })
+from __future__ import annotations
 
+import json
+import subprocess
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Tuple, Optional
 
+from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtGui import QColor, QPen, QBrush
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QMessageBox, QFileDialog,
+    QTabWidget, QTextEdit, QSpinBox, QSlider, QListWidget, QListWidgetItem,
+    QComboBox, QColorDialog, QGraphicsScene, QGraphicsView,
+    QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem
+)
 
-def import_flag_to_mod(mod_root: Path, tag: str, src_image: Path):
-    img = Image.open(src_image).convert("RGBA")
-    sizes = {
-        mod_root / f"gfx/flags/{tag}.tga": (82, 52),
-        mod_root / f"gfx/flags/medium/{tag}.tga": (41, 26),
-        mod_root / f"gfx/flags/small/{tag}.tga": (10, 7),
-    }
-    for out, size in sizes.items():
-        out.parent.mkdir(parents=True, exist_ok=True)
-        img.resize(size, Image.LANCZOS).save(out, format="TGA")
+from PIL import Image
 
-def _have_magick():
-    return shutil.which("magick") is not None or shutil.which("convert") is not None
+from .settings import AppSettings, HOI4Paths, load_settings, save_settings
+from .localisation import append_localisation, parse_english_localisation
+from .tags import load_vanilla_tags, load_mod_tags, add_country_tag
+from .countries import (
+    ensure_dir, create_mod_structure, write_country_definition, 
+    write_country_history, write_localisation_country, 
+    write_portrait_gfx, write_character_file
+)
+from .states import (
+    find_state_file_in_dir, ensure_state_in_mod, patch_state_owner,
+    apply_states, build_state_index
+)
+from .events import generate_event_file, generate_event_localisation, EFFECTS
+from .focus import (
+    FOCUS_ID_RE2, ICON_RE2, X_RE2, Y_RE2, COST_RE2, PREREQ_RE2,
+    load_focus_tree_file, export_focus_tree, export_focus_localisation
+)
+from .mod_finder import find_mods_in_user_mod_folder
+from .utils import (
+    nuclear_delete_mod, import_flag_to_mod, _have_magick, 
+    import_portrait_to_mod
+)
 
-def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: Path):
-    out_dir = mod_root / f"gfx/leaders/{tag}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    size = (156, 210)
-    png = out_dir / f"{name_slug}.png"
-    dds = out_dir / f"{name_slug}.dds"
-    tga = out_dir / f"{name_slug}.tga"
-    img = Image.open(src_image).convert("RGBA").resize(size, Image.LANCZOS)
-    img.save(png, format="PNG")
-    if _have_magick():
-        try:
-            subprocess.run(["magick", str(png), "-define", "dds:compression=dxt5", str(dds)], check=True)
-            if dds.exists():
-                return dds
-        except Exception:
-            pass
-    img.save(tga, format="TGA")
-    return tga
-
-def find_state_file_in_dir(dir_path: Path, state_id: int):
-    for f in dir_path.glob("*.txt"):
-        if f.name.startswith(f"{state_id} "):
-            return f
-    for f in dir_path.glob("*.txt"):
-        txt = f.read_text(encoding="utf-8", errors="ignore")
-        if re.search(rf"\bid\s*=\s*{state_id}\b", txt):
-            return f
-    return None
-
-def ensure_state_in_mod(mod_root: Path, hoi4_install: Path, state_id: int):
-    mod_states = mod_root / "history/states"
-    mod_states.mkdir(parents=True, exist_ok=True)
-    f = find_state_file_in_dir(mod_states, state_id)
-    if f:
-        return f
-    vanilla_states = hoi4_install / "history/states"
-    vf = find_state_file_in_dir(vanilla_states, state_id)
-    if not vf:
-        return None
-    dst = mod_states / vf.name
-    shutil.copy2(vf, dst)
-    return dst
-
-def _extract_braced_block(text: str, start_index: int):
-    depth = 1
-    i = start_index
-    while i < len(text) and depth > 0:
-        c = text[i]
-        if c == "{": depth += 1
-        elif c == "}": depth -= 1
-        i += 1
-    if depth != 0:
-        raise ValueError("Unbalanced braces")
-    return text[start_index:i-1], i
-
-def patch_state_owner(state_text: str, tag: str):
-    m = re.search(r"\bhistory\s*=\s*\{", state_text)
-    if not m:
-        return state_text + f"\nhistory = {{\n owner = {tag}\n add_core_of = {tag}\n}}\n"
-    block, end = _extract_braced_block(state_text, m.end())
-    before = state_text[:m.end()]
-    after = state_text[end-1:]
-    hb = block
-    if re.search(r"\bowner\s*=", hb):
-        hb = re.sub(r"\bowner\s*=\s*\w+", f"owner = {tag}", hb)
-    else:
-        hb = f"\n owner = {tag}\n" + hb
-    if not re.search(rf"\badd_core_of\s*=\s*{tag}\b", hb):
-        hb = f"\n add_core_of = {tag}\n" + hb
-    return before + hb + after
-
-def apply_states(mod_root: Path, tag: str, state_ids: list[int], hoi4_install: Optional[Path]):
-    state_dir = mod_root / "history/states"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    for sid in state_ids:
-        f = find_state_file_in_dir(state_dir, sid)
-        if not f:
-            f = ensure_state_in_mod(mod_root, hoi4_install, sid) if hoi4_install else None
-        if not f:
-            raise ValueError(f"State {sid} not found")
-        txt = f.read_text(encoding="utf-8", errors="ignore")
-        f.write_text(patch_state_owner(txt, tag), encoding="utf-8")
-
-STATE_ID_RE = re.compile(r"\bid\s*=\s*(\d+)")
-STATE_NAME_KEY_RE = re.compile(r'\bname\s*=\s*"([^"]+)"')
-OWNER_RE = re.compile(r"\bowner\s*=\s*([A-Z0-9]{3})")
-
-def build_state_index(states_dir: Path, loc_maps: list[dict[str, str]]):
-    out = []
-    for f in sorted(states_dir.glob("*.txt")):
-        txt = f.read_text(encoding="utf-8", errors="ignore")
-        mid = STATE_ID_RE.search(txt)
-        if not mid:
-            continue
-        sid = int(mid.group(1))
-        mkey = STATE_NAME_KEY_RE.search(txt)
-        key = mkey.group(1) if mkey else None
-        name = key or f.name
-        if key:
-            for lm in loc_maps:
-                if key in lm:
-                    name = lm[key]
-                    break
-        owner = None
-        mo = OWNER_RE.search(txt)
-        if mo:
-            owner = mo.group(1)
-        out.append({"id": sid, "name": name, "owner": owner})
-    return out
-
-def generate_event_file(mod_root: Path, namespace: str, events: list[dict]):
-    out = f"add_namespace = {namespace}\n\n"
-    for ev in events:
-        out += (
-            "country_event = {\n"
-            f" id = {ev['id']}\n"
-            f" title = {ev['id']}.t\n"
-            f" desc = {ev['id']}.d\n"
-            f" picture = {ev.get('picture','GFX_report_event_generic')}\n\n"
-            " trigger = {\n"
-            f"  {ev.get('trigger','')}\n"
-            " }\n\n"
-            " option = {\n"
-            f"  name = {ev['id']}.a\n"
-            f"  {ev.get('effect','')}\n"
-            " }\n"
-            "}\n\n"
-        )
-    p = mod_root / f"events/{namespace}_events.txt"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(out, encoding="utf-8")
-
-def generate_event_localisation(mod_root: Path, namespace: str, events: list[dict]):
-    loc_path = mod_root / f"localisation/english/{namespace}_events_l_english.yml"
-    entries = {}
-    for ev in events:
-        entries[f"{ev['id']}.t"] = ev["title"]
-        entries[f"{ev['id']}.d"] = ev["desc"]
-        entries[f"{ev['id']}.a"] = ev["option_text"]
-    append_localisation(loc_path, entries)
-
-EFFECTS = [
-    ("Political Power (+)", "add_political_power = 120"),
-    ("Stability (+)", "add_stability = 0.05"),
-    ("War Support (+)", "add_war_support = 0.05"),
-    ("Research Slot (+1)", "add_research_slot = 1"),
-    ("Army Experience (+)", "add_army_experience = 10"),
-    ("Navy Experience (+)", "add_navy_experience = 10"),
-    ("Air Experience (+)", "add_air_experience = 10"),
-    ("Add Command Power", "add_command_power = 25"),
-    ("Add Popularity (democratic)", "add_popularity = { ideology = democratic popularity = 0.1 }"),
-    ("Add Popularity (fascism)", "add_popularity = { ideology = fascism popularity = 0.1 }"),
-    ("Add Popularity (communism)", "add_popularity = { ideology = communism popularity = 0.1 }"),
-    ("Add Popularity (neutrality)", "add_popularity = { ideology = neutrality popularity = 0.1 }"),
-    ("Create Faction", "create_faction = \"My Faction\""),
-    ("Leave Faction", "leave_faction = yes"),
-    ("Transfer State", "transfer_state = 123"),
-    ("Add Civilian Factory", "add_building_construction = { type = industrial_complex level = 1 instant_build = yes }"),
-    ("Add Military Factory", "add_building_construction = { type = arms_factory level = 1 instant_build = yes }"),
-    ("Add Infrastructure", "add_building_construction = { type = infrastructure level = 1 instant_build = yes }"),
-    ("Add Manpower", "add_manpower = 50000"),
-]
-
-FOCUS_ID_RE2 = re.compile(r"\bid\s*=\s*([A-Za-z0-9_\-]+)")
-ICON_RE2 = re.compile(r"\bicon\s*=\s*([A-Za-z0-9_\-]+)")
-X_RE2 = re.compile(r"\bx\s*=\s*(-?\d+)")
-Y_RE2 = re.compile(r"\by\s*=\s*(-?\d+)")
-COST_RE2 = re.compile(r"\bcost\s*=\s*(\d+)")
-PREREQ_RE2 = re.compile(r"\bfocus\s*=\s*([A-Za-z0-9_\-]+)")
-
-def load_focus_tree_file(path: Path):
-    txt = path.read_text(encoding="utf-8", errors="ignore")
-    blocks = txt.split("focus = {")
-    nodes = []
-    for b in blocks[1:]:
-        chunk = b.split("}")[0]
-        mid = FOCUS_ID_RE2.search(chunk)
-        if not mid:
-            continue
-        fid = mid.group(1)
-        icon = ICON_RE2.search(chunk)
-        x = X_RE2.search(chunk)
-        y = Y_RE2.search(chunk)
-        cost = COST_RE2.search(chunk)
-        prereqs = []
-        if "prerequisite" in chunk:
-            for m in PREREQ_RE2.finditer(chunk):
-                prereqs.append(m.group(1))
-        nodes.append({
-            "id": fid,
-            "name": fid,
-            "icon": icon.group(1) if icon else "GFX_goal_generic_construct_civilian",
-            "x": int(x.group(1)) if x else 0,
-            "y": int(y.group(1)) if y else 0,
-            "prereq": prereqs,
-            "reward": "",
-            "days": int(cost.group(1))*7 if cost else 70
-        })
-    return nodes
-
-def export_focus_tree(mod_root: Path, tree_id: str, tag: str, nodes: list[dict]):
-    out = (
-        "focus_tree = {\n"
-        f" id = {tree_id}\n\n"
-        " country = {\n"
-        "  factor = 0\n"
-        "  modifier = {\n"
-        "   add = 10\n"
-        f"   tag = {tag}\n"
-        "  }\n"
-        " }\n\n"
-    )
-    for n in nodes:
-        prereq_block = ""
-        if n.get("prereq"):
-            prereq_block = " prerequisite = {\n"
-            for p in n["prereq"]:
-                prereq_block += f"  focus = {p}\n"
-            prereq_block += " }\n"
-        days = int(n.get("days", 70))
-        cost = max(1, int(round(days / 7)))
-        out += (
-            " focus = {\n"
-            f"  id = {n['id']}\n"
-            f"  icon = {n.get('icon','GFX_goal_generic_construct_civilian')}\n"
-            f"  x = {n.get('x',0)}\n"
-            f"  y = {n.get('y',0)}\n"
-            f"  cost = {cost}\n"
-            f"{prereq_block}"
-            "  completion_reward = {\n"
-            f"   {n.get('reward','')}\n"
-            "  }\n"
-            " }\n"
-        )
-    out += "}\n"
-    p = mod_root / f"common/national_focus/{tag}_focus.txt"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(out, encoding="utf-8")
-
-def export_focus_localisation(mod_root: Path, tag: str, nodes: list[dict]):
-    loc_path = mod_root / f"localisation/english/{tag}_focus_l_english.yml"
-    entries = {n["id"]: n["name"] for n in nodes}
-    append_localisation(loc_path, entries)
 
 COLOR_RE = re.compile(r"\bcolor\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}")
 CAPITAL_RE = re.compile(r"\bcapital\s*=\s*(\d+)")
 POP_RE = re.compile(r"\b(democratic|fascism|communism|neutrality)\s*=\s*(\d+)")
 
+
 def read_country_definition(mod_root: Path, tag: str):
+    """
+    Read a country definition from the mod.
+    
+    Args:
+        mod_root: Path to mod directory
+        tag: Country tag
+        
+    Returns:
+        Dictionary with country information
+    """
     p = mod_root / f"common/countries/{tag}.txt"
     if not p.exists(): return {}
     txt = p.read_text(encoding="utf-8", errors="ignore")
@@ -549,7 +72,18 @@ def read_country_definition(mod_root: Path, tag: str):
         return {"color": (int(m.group(1)), int(m.group(2)), int(m.group(3)))}
     return {}
 
+
 def read_country_history(mod_root: Path, tag: str):
+    """
+    Read a country history from the mod.
+    
+    Args:
+        mod_root: Path to mod directory
+        tag: Country tag
+        
+    Returns:
+        Dictionary with country history information
+    """
     d = mod_root / "history/countries"
     if not d.exists(): return {}
     f = None
@@ -563,7 +97,18 @@ def read_country_history(mod_root: Path, tag: str):
         pops[m.group(1)] = int(m.group(2))
     return {"capital": int(cap.group(1)) if cap else 1, "popularities": pops}
 
+
 def read_country_localisation(mod_root: Path, tag: str):
+    """
+    Read country localisation from the mod.
+    
+    Args:
+        mod_root: Path to mod directory
+        tag: Country tag
+        
+    Returns:
+        Dictionary with localisation information
+    """
     loc_dir = mod_root / "localisation/english"
     if not loc_dir.exists(): return {}
     for f in loc_dir.rglob("*.yml"):
@@ -580,6 +125,7 @@ def read_country_localisation(mod_root: Path, tag: str):
                 adj = s.split(" ", 1)[-1].strip().strip('"')
         if name or adj: return {"name": name, "adj": adj}
     return {}
+
 
 class ProjectTab(QWidget):
     def __init__(self, mw: "MainWindow"):
@@ -684,6 +230,7 @@ class ProjectTab(QWidget):
             QMessageBox.information(self, "Deleted", "Mod nuked.")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
 
 class CountryTab(QWidget):
     def __init__(self, mw: "MainWindow"):
@@ -836,6 +383,7 @@ class CountryTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
+
 class StatesTab(QWidget):
     def __init__(self, mw: "MainWindow"):
         super().__init__()
@@ -879,6 +427,7 @@ class StatesTab(QWidget):
             QMessageBox.information(self, "Done", "States applied.")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
 
 class StateBrowserTab(QWidget):
     def __init__(self, mw:"MainWindow"):
@@ -958,6 +507,7 @@ class StateBrowserTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
+
 class EventBuilderTab(QWidget):
     def __init__(self, mw:"MainWindow"):
         super().__init__()
@@ -979,6 +529,7 @@ class EventBuilderTab(QWidget):
             QMessageBox.information(self, "Done", "Events exported.")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
 
 class FocusNodeItem(QGraphicsRectItem):
     def __init__(self, tab, focus_id: str, name: str, x: int, y: int):
@@ -1011,6 +562,7 @@ class FocusNodeItem(QGraphicsRectItem):
             return
         super().mousePressEvent(event)
 
+
 class FocusLinkItem(QGraphicsItem):
     def __init__(self, a: FocusNodeItem, b: FocusNodeItem):
         super().__init__()
@@ -1028,6 +580,7 @@ class FocusLinkItem(QGraphicsItem):
             if self.tab:
                 self.tab.redraw_links()
         return super().itemChange(change, value)
+
 
 class FocusTab(QWidget):
     def __init__(self, mw:"MainWindow"):
@@ -1190,7 +743,7 @@ class FocusTab(QWidget):
 
         # update node prereq list
         if pre:
-            self.nodes[fid]["prerFocusTabeq"] = [pre]
+            self.nodes[fid]["prereq"] = [pre]
         else:
             self.nodes[fid]["prereq"] = []
 
@@ -1201,8 +754,7 @@ class FocusTab(QWidget):
         if pre and pre in self.items and fid in self.items:
             self.links.append((pre, fid))
 
-        self.redraw_links()
-
+        self.redraw_links())
 
 
     def _on_reward_changed(self):
@@ -1322,6 +874,7 @@ class FocusTab(QWidget):
 
         self.redraw_links()
 
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1349,10 +902,12 @@ class MainWindow(QMainWindow):
         self.browser.reload_tags()
         self.focus.reload_tags()
 
+
 def main():
     app=QApplication([])
     w=MainWindow(); w.show()
     app.exec()
+
 
 if __name__=="__main__":
     main()

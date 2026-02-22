@@ -1130,6 +1130,84 @@ class FocusTab(QWidget):
         self.redraw_links()
 
 
+class LocalizationManagerTab(QWidget):
+    def __init__(self, mw: "MainWindow"):
+        super().__init__()
+        self.mw = mw
+        self.entries: dict[str, str] = {}
+
+        layout = QVBoxLayout(self)
+
+        search_row = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search localisation keys or values")
+        btn_refresh = QPushButton("Reload Localisation")
+        btn_refresh.clicked.connect(self.refresh_localization_entries)
+        search_row.addWidget(self.search)
+        search_row.addWidget(btn_refresh)
+        layout.addLayout(search_row)
+
+        self.list = QListWidget()
+        self.list.itemSelectionChanged.connect(self.populate_selected_entry)
+        layout.addWidget(self.list)
+
+        form = QFormLayout()
+        self.key = QLineEdit()
+        self.value = QLineEdit()
+        form.addRow("Key", self.key)
+        form.addRow("Value", self.value)
+        layout.addLayout(form)
+
+        button_row = QHBoxLayout()
+        btn_save = QPushButton("Save / Update Entry")
+        btn_save.clicked.connect(self.save_entry)
+        button_row.addWidget(btn_save)
+        layout.addLayout(button_row)
+
+        self.search.textChanged.connect(self.refresh_list)
+
+    def refresh_localization_entries(self):
+        if not self.mw.paths:
+            self.entries = {}
+            self.list.clear()
+            return
+        loc_dir = self.mw.paths.mod_root / "localisation/english"
+        self.entries = parse_english_localisation(loc_dir)
+        self.refresh_list()
+
+    def refresh_list(self):
+        query = self.search.text().strip().lower()
+        self.list.clear()
+        for key in sorted(self.entries):
+            value = self.entries[key]
+            if query and query not in key.lower() and query not in value.lower():
+                continue
+            item = QListWidgetItem(f"{key} = {value}")
+            item.setData(Qt.UserRole, key)
+            self.list.addItem(item)
+
+    def populate_selected_entry(self):
+        item = self.list.currentItem()
+        if not item:
+            return
+        key = item.data(Qt.UserRole)
+        self.key.setText(key)
+        self.value.setText(self.entries.get(key, ""))
+
+    def save_entry(self):
+        if not self.mw.paths:
+            return
+        key = self.key.text().strip()
+        value = self.value.text().strip()
+        if not key:
+            QMessageBox.warning(self, "Missing key", "Please enter a localisation key.")
+            return
+        loc_file = self.mw.paths.mod_root / "localisation/english/mod_localisation_l_english.yml"
+        append_localisation(loc_file, {key: value})
+        self.refresh_localization_entries()
+        QMessageBox.information(self, "Saved", f"Saved localisation key '{key}'.")
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1138,6 +1216,7 @@ class MainWindow(QMainWindow):
         self.settings=load_settings()
         self.paths: Optional[HOI4Paths]=None
         tabs=QTabWidget(); self.setCentralWidget(tabs)
+        self.tabs = tabs
         self.project=ProjectTab(self)
         self.country=CountryTab(self)
         self.states=StatesTab(self)

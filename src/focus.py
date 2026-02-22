@@ -48,6 +48,7 @@ def load_focus_tree_file(path: Path) -> list[dict]:
         nodes.append({
             "id": fid,
             "name": fid,
+            "description": f"{fid} description",  # Default description
             "icon": icon.group(1) if icon else "GFX_goal_generic_construct_civilian",
             "x": int(x.group(1)) if x else 0,
             "y": int(y.group(1)) if y else 0,
@@ -117,6 +118,11 @@ def export_focus_localisation(mod_root: Path, tag: str, nodes: list[dict]) -> No
         nodes: List of focus node dictionaries
     """
     loc_path = mod_root / f"localisation/english/{tag}_focus_l_english.yml"
-    entries = {n["id"]: n["name"] for n in nodes}
+    entries = {}
+    for n in nodes:
+        entries[n["id"]] = n["name"]
+        # Add description localization if available
+        if "description" in n:
+            entries[f"{n['id']}_desc"] = n["description"]
     from .localisation import append_localisation
     append_localisation(loc_path, entries)

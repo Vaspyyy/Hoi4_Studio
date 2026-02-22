@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QMessageBox, QFileDialog,
     QTabWidget, QTextEdit, QSpinBox, QSlider, QListWidget, QListWidgetItem,
-    QComboBox, QCheckBox, QColorDialog, QGraphicsScene, QGraphicsView,
+    QComboBox, QCheckBox, QGridLayout, QColorDialog, QGraphicsScene, QGraphicsView,
     QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem
 )
 

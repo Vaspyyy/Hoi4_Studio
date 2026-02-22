@@ -1,7 +1,27 @@
-from src.main import main
+#!/usr/bin/env python3
+from __future__ import annotations
 
-if __name__ == "__main__":
-    main()
+"""HOI4 Modding Studio - Single File Edition"""
+
+import json, re, shutil, subprocess
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Tuple, Optional
+
+from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtGui import QColor, QPen, QBrush
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QMessageBox, QFileDialog,
+    QTabWidget, QTextEdit, QSpinBox, QSlider, QListWidget, QListWidgetItem,
+    QComboBox, QColorDialog, QGraphicsScene, QGraphicsView,
+    QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem
+)
+
+from PIL import Image
+
+APP_DIR = Path.home() / ".config" / "hoi4-modding-studio"
+SETTINGS_FILE = APP_DIR / "settings.json"
 
 @dataclass
 class AppSettings:

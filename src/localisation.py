@@ -1,7 +1,7 @@
 """
 HOI4 Modding Studio - Localisation Utilities
 
-This module provides utilities for handling localisation files in HOI4 mods.
+This module provides functions for handling localisation in HOI4 mods.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from pathlib import Path
 
 
 YML_ENTRY_RE = re.compile(r'^\s*([^:#\s]+)\s*:\s*(?:\d+\s*)?\s*"(.*)"\s*$')
-TAG_LINE_RE = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*".*"\s*$')
 
 
 def append_localisation(path: Path, entries: dict[str, str]) -> None:

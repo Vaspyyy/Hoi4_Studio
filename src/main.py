@@ -7,6 +7,7 @@ This is the main application file for the HOI4 Modding Studio.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -698,7 +699,6 @@ class FocusTab(QWidget):
             self.redraw_links()
             # reset fields so prereq doesn't leak into the next focus
             self.prereq.setText("")
-            self.buf.setText("")
 
 
     def on_select(self):
@@ -754,7 +754,7 @@ class FocusTab(QWidget):
         if pre and pre in self.items and fid in self.items:
             self.links.append((pre, fid))
 
-        self.redraw_links())
+        self.redraw_links()
 
 
     def _on_reward_changed(self):

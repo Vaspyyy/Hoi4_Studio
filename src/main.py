@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Tuple, Optional
 
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QColor, QPen, QBrush, QFont
+from PySide6.QtGui import QColor, QPen, QBrush, QFont, QPainter
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QMessageBox, QFileDialog,
     QTabWidget, QTextEdit, QSpinBox, QSlider, QListWidget, QListWidgetItem,
-    QComboBox, QColorDialog, QGraphicsScene, QGraphicsView,
+    QComboBox, QCheckBox, QGridLayout, QFormLayout, QColorDialog, QGraphicsScene, QGraphicsView,
     QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem
 )
 

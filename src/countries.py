@@ -7,7 +7,10 @@ This module provides functionality for creating countries in HOI4 mods.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .settings import HOI4Paths
 
 
 def ensure_dir(p: Path) -> None:

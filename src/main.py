@@ -158,6 +158,17 @@ class ProjectTab(QWidget):
 
         layout.addWidget(btn_apply); layout.addWidget(btn_struct)
 
+        # Localization settings
+        layout.addWidget(QLabel("Localization Settings"))
+        loc_layout = QHBoxLayout()
+        self.loc_dir = QLineEdit()
+        self.loc_dir.setPlaceholderText("Auto-detected from HOI4 install path")
+        self.loc_dir.setReadOnly(True)
+        btn_loc_refresh = QPushButton("Refresh Localization")
+        btn_loc_refresh.clicked.connect(self.refresh_localization)
+        loc_layout.addWidget(QLabel("Loc Dir")); loc_layout.addWidget(self.loc_dir); loc_layout.addWidget(btn_loc_refresh)
+        layout.addLayout(loc_layout)
+
         layout.addWidget(QLabel("Mods in user folder (.mod)"))
         rm = QHBoxLayout()
         self.mods_combo = QComboBox()
@@ -179,6 +190,16 @@ class ProjectTab(QWidget):
         d = QFileDialog.getExistingDirectory(self, "Select folder")
         if d: le.setText(d)
 
+    def refresh_localization(self):
+        """Refresh localization directory based on HOI4 install path"""
+        hoi4_path = self.hoi4_install.text().strip()
+        if hoi4_path:
+            loc_path = Path(hoi4_path) / "localisation/english"
+            if loc_path.exists():
+                self.loc_dir.setText(str(loc_path))
+            else:
+                QMessageBox.warning(self, "Warning", f"Localization directory not found at {loc_path}")
+
     def apply_paths(self):
         try:
             hoi4 = Path(self.hoi4_install.text()).expanduser()
@@ -187,6 +208,12 @@ class ProjectTab(QWidget):
             if not hoi4.exists(): raise ValueError("HOI4 install not found")
             if not user.exists(): raise ValueError("User mods not found")
             if not mod.exists(): raise ValueError("Mod root not found")
+            
+            # Set localization path automatically
+            loc_path = hoi4 / "localisation/english"
+            if loc_path.exists():
+                self.loc_dir.setText(str(loc_path))
+            
             self.mw.paths = HOI4Paths(hoi4, user, mod)
             self.mw.settings.hoi4_install = str(hoi4)
             self.mw.settings.user_mods = str(user)
@@ -475,7 +502,20 @@ class StateBrowserTab(QWidget):
 
     def reload_index(self):
         if not self.mw.paths: return
-        vanilla_loc = parse_english_localisation(self.mw.paths.hoi4_install / "localisation/english")
+        
+        # Get the localization directory from the project tab
+        project_tab = None
+        for i in range(self.mw.tabs.count()):
+            if isinstance(self.mw.tabs.widget(i), ProjectTab):
+                project_tab = self.mw.tabs.widget(i)
+                break
+        
+        if project_tab and project_tab.loc_dir.text():
+            vanilla_loc_path = Path(project_tab.loc_dir.text())
+        else:
+            vanilla_loc_path = self.mw.paths.hoi4_install / "localisation/english"
+        
+        vanilla_loc = parse_english_localisation(vanilla_loc_path)
         mod_loc = parse_english_localisation(self.mw.paths.mod_root / "localisation/english")
         self.state_index = build_state_index(self.mw.paths.hoi4_install / "history/states", [mod_loc, vanilla_loc])
         self.selected=set()
@@ -1104,18 +1144,23 @@ class MainWindow(QMainWindow):
         self.browser=StateBrowserTab(self)
         self.events=EventBuilderTab(self)
         self.focus=FocusTab(self)
+        self.loc_manager=LocalizationManagerTab(self)
         tabs.addTab(self.project,"Project")
         tabs.addTab(self.country,"Country Builder")
         tabs.addTab(self.states,"States (IDs)")
         tabs.addTab(self.browser,"State Browser")
         tabs.addTab(self.events,"Event Builder")
         tabs.addTab(self.focus,"Focus Tree Editor")
+        tabs.addTab(self.loc_manager,"Localization Manager")
 
     def refresh_all_tag_dropdowns(self):
         self.country.reload_tags()
         self.states.reload_tags()
         self.browser.reload_tags()
         self.focus.reload_tags()
+        # Refresh localization when tags are reloaded
+        if hasattr(self, 'loc_manager'):
+            self.loc_manager.refresh_localization_entries()
 
 
 def main():

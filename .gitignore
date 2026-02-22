@@ -1,27 +1,5 @@
-```
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+(src/main.py, README.md, config.json)
 
-# Dependencies
-.venv/
-venv/
-.env
-.env.local
-.env.*
-
-# Logs and temp files
-*.log
-*.tmp
-
-# Editors
-.vscode/
-.idea/
-
-# Build artifacts
-dist/
-build/
-target/
-```
+(old/unused.py)
+(utils.py)
+(empty)

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QColor, QPen, QBrush
+from PySide6.QtGui import QColor, QPen, QBrush, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QMessageBox, QFileDialog,
@@ -246,6 +246,10 @@ class CountryTab(QWidget):
         rowpick.addWidget(QLabel("Edit")); rowpick.addWidget(self.tag_picker); rowpick.addWidget(btn_reload); rowpick.addWidget(btn_load)
         layout.addLayout(rowpick)
 
+        # Add checkbox to disable TAG availability checking
+        self.disable_tag_check = QCheckBox("Disable TAG availability checking")
+        layout.addWidget(self.disable_tag_check)
+
         self.tag = QLineEdit("ABC")
         self.name = QLineEdit("Exampleland")
         self.adj = QLineEdit("Examplelander")
@@ -355,8 +359,10 @@ class CountryTab(QWidget):
         tag = self.tag.text().strip().upper()
         if len(tag) != 3:
             QMessageBox.critical(self, "Error", "TAG must be 3 letters"); return
-        if tag in load_vanilla_tags(self.mw.paths.hoi4_install):
-            QMessageBox.critical(self, "Error", f"TAG {tag} taken"); return
+        # Check if TAG availability checking is disabled
+        if not self.disable_tag_check.isChecked():
+            if tag in load_vanilla_tags(self.mw.paths.hoi4_install):
+                QMessageBox.critical(self, "Error", f"TAG {tag} taken"); return
         try:
             r,g,b = [int(x.strip()) for x in self.color_preview.text().split(",")]
             pops = {"democratic": self.s_dem.value(), "fascism": self.s_fas.value(), "communism": self.s_com.value(), "neutrality": self.s_neu.value()}
@@ -514,19 +520,125 @@ class EventBuilderTab(QWidget):
         super().__init__()
         self.mw=mw
         layout=QVBoxLayout(self)
+        
+        # Namespace input
+        layout.addWidget(QLabel("Namespace"))
         self.namespace=QLineEdit("my_mod")
-        self.events=QTextEdit()
-        self.events.setPlaceholderText("[{\n  \"id\": \"my_mod.1\",\n  \"title\": \"Hello\",\n  \"desc\": \"Welcome\",\n  \"option_text\": \"OK\",\n  \"trigger\": \"tag = WST\",\n  \"effect\": \"add_political_power = 120\"\n}]")
-        btn=QPushButton("Export Events"); btn.clicked.connect(self.export)
-        layout.addWidget(QLabel("Namespace")); layout.addWidget(self.namespace)
-        layout.addWidget(self.events); layout.addWidget(btn)
+        layout.addWidget(self.namespace)
+        
+        # Event form
+        form_layout = QGridLayout()
+        
+        # Event ID
+        form_layout.addWidget(QLabel("Event ID"), 0, 0)
+        self.event_id = QLineEdit("my_mod.1")
+        form_layout.addWidget(self.event_id, 0, 1)
+        
+        # Title
+        form_layout.addWidget(QLabel("Title"), 1, 0)
+        self.title = QLineEdit("New Event")
+        form_layout.addWidget(self.title, 1, 1)
+        
+        # Description
+        form_layout.addWidget(QLabel("Description"), 2, 0)
+        self.description = QLineEdit("An interesting event happens")
+        form_layout.addWidget(self.description, 2, 1)
+        
+        # Option Text
+        form_layout.addWidget(QLabel("Option Text"), 3, 0)
+        self.option_text = QLineEdit("OK")
+        form_layout.addWidget(self.option_text, 3, 1)
+        
+        # Trigger
+        form_layout.addWidget(QLabel("Trigger"), 4, 0)
+        self.trigger = QLineEdit("tag = WST")
+        form_layout.addWidget(self.trigger, 4, 1)
+        
+        # Effect dropdown with search
+        form_layout.addWidget(QLabel("Effect"), 5, 0)
+        effect_layout = QHBoxLayout()
+        self.effect_dropdown = QComboBox()
+        self.effect_dropdown.setEditable(True)
+        self.effect_dropdown.setInsertPolicy(QComboBox.NoInsert)
+        for label, code in EFFECTS:
+            self.effect_dropdown.addItem(label, code)
+        effect_layout.addWidget(self.effect_dropdown)
+        self.custom_effect = QLineEdit()
+        self.custom_effect.setPlaceholderText("Or enter custom effect")
+        effect_layout.addWidget(self.custom_effect)
+        form_layout.addLayout(effect_layout, 5, 1)
+        
+        # Picture
+        form_layout.addWidget(QLabel("Picture"), 6, 0)
+        self.picture = QLineEdit("GFX_report_event_generic")
+        form_layout.addWidget(self.picture, 6, 1)
+        
+        layout.addLayout(form_layout)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.add_event_btn = QPushButton("Add Event")
+        self.add_event_btn.clicked.connect(self.add_event)
+        self.clear_events_btn = QPushButton("Clear All Events")
+        self.clear_events_btn.clicked.connect(self.clear_events)
+        button_layout.addWidget(self.add_event_btn)
+        button_layout.addWidget(self.clear_events_btn)
+        layout.addLayout(button_layout)
+        
+        # Events list
+        layout.addWidget(QLabel("Current Events"))
+        self.events_list = QListWidget()
+        layout.addWidget(self.events_list)
+        
+        # Export button
+        self.export_btn = QPushButton("Export Events")
+        self.export_btn.clicked.connect(self.export)
+        layout.addWidget(self.export_btn)
+        
+        # Store events data
+        self.events_data = []
+
+    def add_event(self):
+        event_data = {
+            "id": self.event_id.text().strip(),
+            "title": self.title.text().strip(),
+            "desc": self.description.text().strip(),
+            "option_text": self.option_text.text().strip(),
+            "trigger": self.trigger.text().strip(),
+            "picture": self.picture.text().strip()
+        }
+        
+        # Determine effect
+        selected_effect = self.effect_dropdown.currentData()
+        if selected_effect:
+            event_data["effect"] = selected_effect
+        else:
+            event_data["effect"] = self.custom_effect.text().strip()
+            
+        self.events_data.append(event_data)
+        
+        # Add to list display
+        self.events_list.addItem(f"{event_data['id']}: {event_data['title']}")
+        
+        # Clear form fields
+        self.event_id.setText(f"{self.namespace.text()}.{len(self.events_data)+1}")
+        self.title.clear()
+        self.description.clear()
+        self.option_text.clear()
+        self.trigger.clear()
+        self.custom_effect.clear()
+        self.picture.setText("GFX_report_event_generic")
+
+    def clear_events(self):
+        self.events_data.clear()
+        self.events_list.clear()
 
     def export(self):
-        if not self.mw.paths: return
+        if not self.mw.paths:
+            return
         try:
-            data=json.loads(self.events.toPlainText() or "[]")
-            generate_event_file(self.mw.paths.mod_root, self.namespace.text().strip(), data)
-            generate_event_localisation(self.mw.paths.mod_root, self.namespace.text().strip(), data)
+            generate_event_file(self.mw.paths.mod_root, self.namespace.text().strip(), self.events_data)
+            generate_event_localisation(self.mw.paths.mod_root, self.namespace.text().strip(), self.events_data)
             QMessageBox.information(self, "Done", "Events exported.")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -534,7 +646,7 @@ class EventBuilderTab(QWidget):
 
 class FocusNodeItem(QGraphicsRectItem):
     def __init__(self, tab, focus_id: str, name: str, x: int, y: int):
-        super().__init__(0, 0, 220, 60)
+        super().__init__(0, 0, 220, 80)  # Increased height to accommodate description
         self.tab = tab
         self.focus_id = focus_id
 
@@ -545,12 +657,26 @@ class FocusNodeItem(QGraphicsRectItem):
             QGraphicsItem.ItemSendsGeometryChanges
         )
 
-        self.setBrush(QBrush(QColor(45, 45, 45)))
-        self.setPen(QPen(QColor(120, 120, 120), 2))
+        # Set a more attractive style
+        self.setBrush(QBrush(QColor(60, 60, 60)))
+        self.setPen(QPen(QColor(150, 150, 150), 2))
+        
+        # Add hover effect
+        self.setAcceptHoverEvents(True)
 
-        t = QGraphicsTextItem(f"{focus_id}\n{name}", self)
-        t.setDefaultTextColor(QColor(230, 230, 230))
-        t.setPos(8, 6)
+        # Create text elements
+        title = QGraphicsTextItem(f"{focus_id}", self)
+        title.setDefaultTextColor(QColor(255, 255, 255))
+        title.setPos(10, 5)
+        title.setFont(QFont("Arial", 10, QFont.Bold))
+        
+        # Add description text if available
+        description_text = self.tab.nodes.get(focus_id, {}).get("description", "No description")
+        desc = QGraphicsTextItem(description_text, self)
+        desc.setDefaultTextColor(QColor(200, 200, 200))
+        desc.setPos(10, 25)
+        desc.setFont(QFont("Arial", 8))
+        desc.setTextWidth(200)  # Wrap text at 200 pixels
 
     def center(self) -> QPointF:
         r = self.rect()
@@ -562,6 +688,18 @@ class FocusNodeItem(QGraphicsRectItem):
             event.accept()
             return
         super().mousePressEvent(event)
+    
+    def hoverEnterEvent(self, event):
+        # Change appearance when hovering
+        self.setBrush(QBrush(QColor(80, 80, 80)))
+        self.setPen(QPen(QColor(200, 200, 200), 3))
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        # Restore original appearance when leaving hover
+        self.setBrush(QBrush(QColor(60, 60, 60)))
+        self.setPen(QPen(QColor(150, 150, 150), 2))
+        super().hoverLeaveEvent(event)
 
 
 class FocusLinkItem(QGraphicsItem):
@@ -591,54 +729,126 @@ class FocusTab(QWidget):
         self.items={}
         self.links=[]
         layout=QHBoxLayout(self)
-        left=QVBoxLayout(); right=QVBoxLayout()
-        self.list=QListWidget(); left.addWidget(self.list)
-        rid=QHBoxLayout()
+        
+        # Left panel for focus properties
+        left=QVBoxLayout()
+        
+        # Focus list
+        self.list=QListWidget()
+        left.addWidget(QLabel("Focuses"))
+        left.addWidget(self.list)
+        
+        # Add focus controls
+        add_layout = QHBoxLayout()
         self.focus_id=QLineEdit("WST_focus_1")
-        badd=QPushButton("Add"); badd.clicked.connect(self.add_focus)
-        rid.addWidget(self.focus_id); rid.addWidget(badd)
-        left.addLayout(rid)
-        self.focus_name=QLineEdit("My Focus"); left.addWidget(self.focus_name)
-        # --- prerequisite (simple) ---
-        rpre = QHBoxLayout()
+        badd=QPushButton("Add Focus")
+        badd.clicked.connect(self.add_focus)
+        add_layout.addWidget(self.focus_id)
+        add_layout.addWidget(badd)
+        left.addLayout(add_layout)
+        
+        # Focus properties form
+        prop_layout = QFormLayout()
+        
+        # Focus name
+        self.focus_name=QLineEdit("My Focus")
+        prop_layout.addRow("Name", self.focus_name)
+        
+        # Focus description for localisation
+        self.focus_description = QLineEdit("Focus description")
+        prop_layout.addRow("Description", self.focus_description)
+        
+        # Prerequisite focus
         self.prereq = QLineEdit()
-        self._current_focus_id = None
-        self.prereq.textChanged.connect(self._on_prereq_changed)
         self.prereq.setPlaceholderText("e.g. WST_focus_1")
-        rpre.addWidget(QLabel("Prerequisite Focus"))
-        rpre.addWidget(self.prereq)
-        left.addLayout(rpre)
-
-        rlen=QHBoxLayout()
-        self.len_combo=QComboBox(); self.len_combo.addItems(["14","35","70","custom"])
-        self.len_custom=QSpinBox(); self.len_custom.setRange(1,10000); self.len_custom.setValue(70)
-        rlen.addWidget(QLabel("Days")); rlen.addWidget(self.len_combo); rlen.addWidget(self.len_custom)
-        left.addLayout(rlen)
-        self.icon=QLineEdit("GFX_goal_generic_construct_civilian"); left.addWidget(self.icon)
-        self.reward=QTextEdit(); left.addWidget(self.reward)
-        self.reward.textChanged.connect(self._on_reward_changed)
-        self.effect_search=QLineEdit(); self.effect_search.setPlaceholderText("Search effect...")
+        prop_layout.addRow("Prerequisite Focus", self.prereq)
+        
+        # Days/Duration
+        duration_layout = QHBoxLayout()
+        self.len_combo=QComboBox()
+        self.len_combo.addItems(["14","35","70","custom"])
+        self.len_custom=QSpinBox()
+        self.len_custom.setRange(1,10000)
+        self.len_custom.setValue(70)
+        duration_layout.addWidget(QLabel("Days"))
+        duration_layout.addWidget(self.len_combo)
+        duration_layout.addWidget(self.len_custom)
+        prop_layout.addRow("", duration_layout)
+        
+        # Icon
+        self.icon=QLineEdit("GFX_goal_generic_construct_civilian")
+        prop_layout.addRow("Icon", self.icon)
+        
+        # Reward/Effects
+        self.reward=QTextEdit()
+        self.reward.setMaximumHeight(100)  # Limit height for better layout
+        prop_layout.addRow("Reward/Effects", self.reward)
+        
+        # Effect search and selection
+        self.effect_search=QLineEdit()
+        self.effect_search.setPlaceholderText("Search effect...")
+        prop_layout.addRow("", self.effect_search)
+        
         self.effect_list=QListWidget()
+        self.effect_list.setMaximumHeight(150)  # Limit height
         for label,code in EFFECTS:
-            it=QListWidgetItem(label); it.setData(Qt.UserRole, code); self.effect_list.addItem(it)
-        self.effect_search.textChanged.connect(self.filter_effects)
-        self.effect_list.itemDoubleClicked.connect(self.insert_effect)
-        left.addWidget(self.effect_search); left.addWidget(self.effect_list)
-
-        self.tag_combo=QComboBox(); self.tag_combo.addItem("(none)")
+            it=QListWidgetItem(label)
+            it.setData(Qt.UserRole, code)
+            self.effect_list.addItem(it)
+        prop_layout.addRow("", self.effect_list)
+        
+        left.addLayout(prop_layout)
+        
+        # Right panel for graph visualization
+        right=QVBoxLayout()
+        
+        # Tag and tree ID
+        tag_layout = QHBoxLayout()
+        self.tag_combo=QComboBox()
+        self.tag_combo.addItem("(none)")
         self.tag=QLineEdit("ABC")
         self.tag_combo.currentTextChanged.connect(lambda t: self.tag.setText(t) if t and t!="(none)" else None)
-        rt=QHBoxLayout(); rt.addWidget(self.tag_combo); rt.addWidget(self.tag)
-        right.addLayout(rt)
-        self.tree_id=QLineEdit("my_tree"); right.addWidget(QLabel("Tree ID")); right.addWidget(self.tree_id)
-        bload=QPushButton("Load From Mod"); bload.clicked.connect(self.load_mod)
-        bexp=QPushButton("Export"); bexp.clicked.connect(self.export)
-        right.addWidget(bload); right.addWidget(bexp)
-        self.scene=QGraphicsScene(); self.view=QGraphicsView(self.scene)
+        tag_layout.addWidget(QLabel("Tag"))
+        tag_layout.addWidget(self.tag_combo)
+        tag_layout.addWidget(self.tag)
+        right.addLayout(tag_layout)
+        
+        tree_layout = QHBoxLayout()
+        self.tree_id=QLineEdit("my_tree")
+        tree_layout.addWidget(QLabel("Tree ID"))
+        tree_layout.addWidget(self.tree_id)
+        right.addLayout(tree_layout)
+        
+        # Action buttons
+        action_layout = QHBoxLayout()
+        bload=QPushButton("Load From Mod")
+        bload.clicked.connect(self.load_mod)
+        bexp=QPushButton("Export")
+        bexp.clicked.connect(self.export)
+        action_layout.addWidget(bload)
+        action_layout.addWidget(bexp)
+        right.addLayout(action_layout)
+        
+        # Visualization area
+        self.scene=QGraphicsScene()
+        self.view=QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.Antialiasing)
+        self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        right.addWidget(QLabel("Focus Tree Visualization"))
         right.addWidget(self.view)
-
-        layout.addLayout(left,1); layout.addLayout(right,2)
+        
+        # Connect events
         self.list.itemSelectionChanged.connect(self.on_select)
+        self.reward.textChanged.connect(self._on_reward_changed)
+        self.prereq.textChanged.connect(self._on_prereq_changed)
+        self.effect_search.textChanged.connect(self.filter_effects)
+        self.effect_list.itemDoubleClicked.connect(self.insert_effect)
+        
+        layout.addLayout(left,1)
+        layout.addLayout(right,2)
+        
+        self._current_focus_id = None
         self.reload_tags()
 
     def reload_tags(self):
@@ -678,6 +888,7 @@ class FocusTab(QWidget):
         n = {
             "id": fid,
             "name": self.focus_name.text().strip() or fid,
+            "description": self.focus_description.text().strip() or f"{fid} description",
             "icon": self.icon.text().strip(),
             "x": 0,
             "y": 0,
@@ -706,7 +917,9 @@ class FocusTab(QWidget):
         if not it: return
         fid=it.text(); n=self.nodes.get(fid)
         if not n: return
-        self.focus_id.setText(fid); self.focus_name.setText(n.get("name",fid))
+        self.focus_id.setText(fid)
+        self.focus_name.setText(n.get("name",fid))
+        self.focus_description.setText(n.get("description", f"{fid} description"))
         self.icon.setText(n.get("icon",""))
         self._current_focus_id=fid
         self.reward.blockSignals(True)
@@ -762,6 +975,8 @@ class FocusTab(QWidget):
         if not fid or fid not in self.nodes:
             return
         self.nodes[fid]["reward"]=self.reward.toPlainText().strip()
+        # Also update the description field
+        self.nodes[fid]["description"] = self.focus_description.text().strip() or f"{fid} description"
 
     def redraw_links(self):
         for item in list(self.scene.items()):

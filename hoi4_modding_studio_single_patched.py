@@ -1325,7 +1325,7 @@ class FocusTab(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HOI4 Modding Studio (Single File)")
+        self.setWindowTitle("HOI4 Modding Studio")
         self.resize(1400,850)
         self.settings=load_settings()
         self.paths: Optional[HOI4Paths]=None

@@ -1,4 +1,4 @@
-# HOI4 Modding Studio - Refactored Application
+# HOI4 Modding Studio
 
 The Goal of this app is to be a fully working Hoi4 Mod making IDE, but its not done by far.
 

@@ -1,1 +1,11 @@
-Nothing should be ignored since the changes only include source code files (.py) without any build artifacts, dependencies, or temporary files.
+```
+# Compiled Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build directories
+build/
+dist/
+```

@@ -96,10 +96,28 @@ def read_country_history(mod_root: Path, tag: str):
     if not f: return {}
     txt = f.read_text(encoding="utf-8", errors="ignore")
     cap = CAPITAL_RE.search(txt)
+    
+    # Extract leader name from history file
+    leader_name = None
+    lines = txt.splitlines()
+    for line in lines:
+        line = line.strip()
+        if line.startswith("create_country_leader") or "create_country_leader" in line:
+            # Look for name field in the following lines
+            for i, next_line in enumerate(lines[lines.index(line):]):
+                if "name" in next_line and "=" in next_line:
+                    name_match = re.search(r'name\s*=\s*"([^"]*)"', next_line)
+                    if name_match:
+                        leader_name = name_match.group(1)
+                        break
+                # Stop searching after a few lines to avoid unrelated name fields
+                if i > 10:
+                    break
+    
     pops = dict((k,0) for k in ["democratic","fascism","communism","neutrality"])
     for m in POP_RE.finditer(txt):
         pops[m.group(1)] = int(m.group(2))
-    return {"capital": int(cap.group(1)) if cap else 1, "popularities": pops}
+    return {"capital": int(cap.group(1)) if cap else 1, "popularities": pops, "leader_name": leader_name}
 
 
 def read_country_localisation(mod_root: Path, tag: str):
@@ -382,6 +400,27 @@ class CountryTab(QWidget):
         loc = read_country_localisation(self.mw.paths.mod_root, tag)
         if loc.get("name"): self.name.setText(loc["name"])
         if loc.get("adj"): self.adj.setText(loc["adj"])
+        
+        # Load leader name from history file
+        if h.get("leader_name"):
+            self.leader.setText(h["leader_name"])
+        
+        # Load flag and portrait from the appropriate locations
+        # Check if flag file exists in the mod
+        flag_path = self.mw.paths.mod_root / "gfx" / "flags" / f"{tag.lower()}.tga"
+        if flag_path.exists():
+            self.flag.setText(str(flag_path))
+        
+        # Check if portrait gfx file exists
+        portrait_gfx_path = self.mw.paths.mod_root / "gfx" / "leaders" / tag.lower()
+        if portrait_gfx_path.exists():
+            # Look for any image file in the portrait directory
+            for img_file in portrait_gfx_path.glob("*.dds"):
+                self.portrait.setText(str(img_file))
+                break
+            for img_file in portrait_gfx_path.glob("*.tga"):
+                self.portrait.setText(str(img_file))
+                break
 
     def generate(self):
         if not self.mw.paths:

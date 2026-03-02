@@ -834,8 +834,14 @@ class IdeasTab(QWidget):
 
         # Modifiers section
         layout.addLayout(form_layout)
-        layout.addWidget(QLabel("Modifiers"))
-
+        
+        # Create tabs for different types of modifiers
+        modifiers_tab_widget = QTabWidget()
+        
+        # Basic modifiers tab
+        basic_modifiers_widget = QWidget()
+        basic_layout = QVBoxLayout(basic_modifiers_widget)
+        
         # Economic modifiers
         self.mod_production_speed = QLineEdit("0.10")
         self.mod_industrial_capacity_factory = QLineEdit("0.05")
@@ -846,7 +852,7 @@ class IdeasTab(QWidget):
         economic_layout.addWidget(QLabel("Factory Industrial Capacity"), 1, 0); economic_layout.addWidget(self.mod_industrial_capacity_factory, 1, 1)
         economic_layout.addWidget(QLabel("Consumer Goods Factor"), 2, 0); economic_layout.addWidget(self.mod_consumer_goods_factor, 2, 1)
 
-        layout.addLayout(economic_layout)
+        basic_layout.addLayout(economic_layout)
 
         # Political modifiers
         self.mod_political_power_gain = QLineEdit("0.25")
@@ -858,7 +864,7 @@ class IdeasTab(QWidget):
         political_layout.addWidget(QLabel("Stability Factor"), 1, 0); political_layout.addWidget(self.mod_stability_factor, 1, 1)
         political_layout.addWidget(QLabel("War Support Factor"), 2, 0); political_layout.addWidget(self.mod_war_support_factor, 2, 1)
 
-        layout.addLayout(political_layout)
+        basic_layout.addLayout(political_layout)
 
         # Military modifiers
         self.mod_army_attack_factor = QLineEdit("0.10")
@@ -870,7 +876,46 @@ class IdeasTab(QWidget):
         military_layout.addWidget(QLabel("Army Defense Factor"), 1, 0); military_layout.addWidget(self.mod_army_defence_factor, 1, 1)
         military_layout.addWidget(QLabel("Planning Speed"), 2, 0); military_layout.addWidget(self.mod_planning_speed, 2, 1)
 
-        layout.addLayout(military_layout)
+        basic_layout.addLayout(military_layout)
+        
+        modifiers_tab_widget.addTab(basic_modifiers_widget, "Basic Modifiers")
+        
+        # Advanced modifiers tab with full list of possible effects
+        advanced_modifiers_widget = QWidget()
+        advanced_layout = QVBoxLayout(advanced_modifiers_widget)
+        
+        # Dropdown for selecting effects
+        effect_selection_layout = QHBoxLayout()
+        self.effect_selector = QComboBox()
+        
+        # Import EFFECTS from events module
+        from .events import EFFECTS
+        for effect_name, effect_code in EFFECTS:
+            self.effect_selector.addItem(effect_name, effect_code)
+        
+        effect_selection_layout.addWidget(QLabel("Select Effect:"))
+        effect_selection_layout.addWidget(self.effect_selector)
+        
+        # Button to add selected effect
+        btn_add_effect = QPushButton("Add Selected Effect")
+        btn_add_effect.clicked.connect(self.add_selected_effect)
+        effect_selection_layout.addWidget(btn_add_effect)
+        
+        advanced_layout.addLayout(effect_selection_layout)
+        
+        # List of currently selected effects
+        self.selected_effects_list = QListWidget()
+        advanced_layout.addWidget(QLabel("Selected Effects:"))
+        advanced_layout.addWidget(self.selected_effects_list)
+        
+        # Button to remove selected effect
+        btn_remove_effect = QPushButton("Remove Selected Effect")
+        btn_remove_effect.clicked.connect(self.remove_selected_effect)
+        advanced_layout.addWidget(btn_remove_effect)
+        
+        modifiers_tab_widget.addTab(advanced_modifiers_widget, "Advanced Effects")
+        
+        layout.addWidget(modifiers_tab_widget)
 
         # Ideas list
         self.ideas_list = QListWidget()
@@ -908,7 +953,26 @@ class IdeasTab(QWidget):
         # For now, we just clear the list to avoid confusion
         self.ideas_list.clear()
         for idea in ideas_data.get("static", []):
-            self.ideas_list.addItem(f"{idea['id']}: {idea['name']}")
+            list_item = QListWidgetItem(f"{idea['id']}: {idea.get('name', '')}")
+            list_item.setData(Qt.UserRole, idea)  # Store the full idea object
+            self.ideas_list.addItem(list_item)
+
+    def add_selected_effect(self):
+        """Add the selected effect from the dropdown to the list of selected effects"""
+        current_index = self.effect_selector.currentIndex()
+        if current_index >= 0:
+            effect_name = self.effect_selector.itemText(current_index)
+            effect_code = self.effect_selector.itemData(current_index)
+            # Add the effect to the list
+            list_item = QListWidgetItem(f"{effect_name}: {effect_code}")
+            list_item.setData(Qt.UserRole, effect_code)  # Store the actual effect code
+            self.selected_effects_list.addItem(list_item)
+
+    def remove_selected_effect(self):
+        """Remove the selected effect from the list of selected effects"""
+        current_row = self.selected_effects_list.currentRow()
+        if current_row >= 0:
+            self.selected_effects_list.takeItem(current_row)
 
     def add_idea(self):
         idea_id = self.idea_id.text().strip()
@@ -940,7 +1004,22 @@ class IdeasTab(QWidget):
         # Only add non-None modifiers
         idea_obj["modifier"] = {k: v for k, v in modifiers.items() if v is not None}
         
-        self.ideas_list.addItem(f"{idea_id}: {self.idea_name.text().strip()}")
+        # Add any effects from the advanced effects tab
+        if self.selected_effects_list.count() > 0:
+            # Process the selected effects and convert them to modifiers or triggers
+            # This is a simplified approach - in reality, we'd need to map effects to appropriate modifiers
+            for i in range(self.selected_effects_list.count()):
+                list_item = self.selected_effects_list.item(i)
+                effect_code = list_item.data(Qt.UserRole)
+                # For now, we'll just add a comment to the idea indicating the effect
+                # A proper implementation would parse the effect code and convert it to a modifier
+                pass
+        
+        # Create a custom list item that stores the idea object
+        list_item = QListWidgetItem(f"{idea_id}: {self.idea_name.text().strip()}")
+        list_item.setData(Qt.UserRole, idea_obj)  # Store the full idea object
+        self.ideas_list.addItem(list_item)
+        
         # Clear form after adding
         self.clear_form()
 
@@ -977,18 +1056,22 @@ class IdeasTab(QWidget):
             # Create list of idea objects from the list
             ideas_data = []
             for i in range(self.ideas_list.count()):
-                item_text = self.ideas_list.item(i).text()
-                # For simplicity, we'll create basic idea objects
-                # In a real implementation, you'd store the full idea objects in the list
-                idea_id = item_text.split(":")[0] if ":" in item_text else item_text
-                ideas_data.append({
-                    "id": idea_id,
-                    "icon": " GFX_idea_generic",
-                    "modifier": {
-                        "production_speed_factor": 0.10,
-                        "political_power_gain": 0.25
-                    }
-                })
+                list_item = self.ideas_list.item(i)
+                idea_obj = list_item.data(Qt.UserRole)  # Retrieve the stored idea object
+                if idea_obj:
+                    ideas_data.append(idea_obj)
+                else:
+                    # Fallback for items that don't have stored data
+                    item_text = list_item.text()
+                    idea_id = item_text.split(":")[0] if ":" in item_text else item_text
+                    ideas_data.append({
+                        "id": idea_id,
+                        "icon": " GFX_idea_generic",
+                        "modifier": {
+                            "production_speed_factor": 0.10,
+                            "political_power_gain": 0.25
+                        }
+                    })
 
             # Write the ideas file
             write_ideas_file(self.mw.paths.mod_root, tag, ideas_data)

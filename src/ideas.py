@@ -124,6 +124,8 @@ def read_ideas_file(mod_root: Path, tag: str) -> Dict[str, Any]:
     Returns:
         Dictionary with ideas information
     """
+    import re
+    
     ideas_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_ideas.txt"
     dynamic_ideas_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_dynamic_ideas.txt"
     
@@ -132,14 +134,151 @@ def read_ideas_file(mod_root: Path, tag: str) -> Dict[str, Any]:
     # Read static ideas if file exists
     if ideas_file.exists():
         content = ideas_file.read_text(encoding="utf-8", errors="ignore")
-        # This is a simplified parsing approach
-        # A full parser would be more complex
-        ideas_data["static"] = [{"id": f"{tag}_idea_1", "name": "Sample Idea"}]  # Placeholder
+        
+        # Parse ideas using regex
+        # Pattern to match idea blocks: idea_id = { ... }
+        idea_pattern = r'^\s*([a-zA-Z0-9_]+)\s*=\s*\{([^}]*)\}'
+        ideas_content = ""
+        
+        # Extract the content inside country_ideas = { ... }
+        country_ideas_match = re.search(r'country_ideas\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}', content, re.MULTILINE | re.DOTALL)
+        if country_ideas_match:
+            ideas_content = country_ideas_match.group(1)
+        
+        # Find all individual idea blocks
+        idea_blocks = re.findall(r'^\s*([a-zA-Z0-9_]+)\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}', ideas_content, re.MULTILINE | re.DOTALL)
+        
+        for idea_id, idea_body in idea_blocks:
+            idea_obj = {"id": idea_id.strip()}
+            
+            # Extract icon if present
+            icon_match = re.search(r'icon\s*=\s*([^\n\r]+)', idea_body)
+            if icon_match:
+                idea_obj["icon"] = icon_match.group(1).strip()
+                
+            # Extract modifier if present
+            modifier_match = re.search(r'modifier\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}', idea_body, re.DOTALL)
+            if modifier_match:
+                modifier_content = modifier_match.group(1)
+                modifier = {}
+                # Extract modifier properties
+                mod_properties = re.findall(r'^\s*([a-zA-Z0-9_]+)\s*=\s*([^\n\r]+)', modifier_content, re.MULTILINE)
+                for key, value in mod_properties:
+                    # Convert value to appropriate type
+                    value = value.strip().strip('"')
+                    if value.lower() in ['yes', 'no']:
+                        modifier[key.strip()] = value.lower() == 'yes'
+                    elif '.' in value or 'inf' in value.lower() or '-inf' in value.lower():
+                        try:
+                            modifier[key.strip()] = float(value)
+                        except ValueError:
+                            modifier[key.strip()] = value
+                    elif value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                        try:
+                            modifier[key.strip()] = int(value)
+                        except ValueError:
+                            modifier[key.strip()] = value
+                    else:
+                        modifier[key.strip()] = value
+                idea_obj["modifier"] = modifier
+            
+            ideas_data["static"].append(idea_obj)
     
     # Read dynamic ideas if file exists
     if dynamic_ideas_file.exists():
         content = dynamic_ideas_file.read_text(encoding="utf-8", errors="ignore")
-        # This is a simplified parsing approach
-        ideas_data["dynamic"] = [{"id": f"{tag}_dynamic_idea_1", "name": "Sample Dynamic Idea"}]  # Placeholder
+        
+        # Parse dynamic ideas using regex
+        idea_pattern = r'^\s*([a-zA-Z0-9_]+)\s*=\s*\{([^}]*)}'
+        ideas_content = ""
+        
+        # Extract the content inside dynamic_country_ideas = { ... }
+        dynamic_ideas_match = re.search(r'dynamic_country_ideas\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}', content, re.MULTILINE | re.DOTALL)
+        if dynamic_ideas_match:
+            ideas_content = dynamic_ideas_match.group(1)
+        
+        # Find all individual idea blocks
+        idea_blocks = re.findall(r'^\s*([a-zA-Z0-9_]+)\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}', ideas_content, re.MULTILINE | re.DOTALL)
+        
+        for idea_id, idea_body in idea_blocks:
+            idea_obj = {"id": idea_id.strip()}
+            
+            # Extract potential if present
+            potential_match = re.search(r'potential\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}', idea_body, re.DOTALL)
+            if potential_match:
+                potential_content = potential_match.group(1)
+                potential = {}
+                # Extract potential properties
+                pot_properties = re.findall(r'^\s*([a-zA-Z0-9_]+)\s*=\s*([^\n\r]+)', potential_content, re.MULTILINE)
+                for key, value in pot_properties:
+                    value = value.strip().strip('"')
+                    if value.lower() in ['yes', 'no']:
+                        potential[key.strip()] = value.lower() == 'yes'
+                    elif '.' in value or 'inf' in value.lower() or '-inf' in value.lower():
+                        try:
+                            potential[key.strip()] = float(value)
+                        except ValueError:
+                            potential[key.strip()] = value
+                    elif value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                        try:
+                            potential[key.strip()] = int(value)
+                        except ValueError:
+                            potential[key.strip()] = value
+                    else:
+                        potential[key.strip()] = value
+                idea_obj["potential"] = potential
+            
+            # Extract available if present
+            available_match = re.search(r'available\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}', idea_body, re.DOTALL)
+            if available_match:
+                available_content = available_match.group(1)
+                available = {}
+                # Extract available properties
+                avail_properties = re.findall(r'^\s*([a-zA-Z0-9_]+)\s*=\s*([^\n\r]+)', available_content, re.MULTILINE)
+                for key, value in avail_properties:
+                    value = value.strip().strip('"')
+                    if value.lower() in ['yes', 'no']:
+                        available[key.strip()] = value.lower() == 'yes'
+                    elif '.' in value or 'inf' in value.lower() or '-inf' in value.lower():
+                        try:
+                            available[key.strip()] = float(value)
+                        except ValueError:
+                            available[key.strip()] = value
+                    elif value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                        try:
+                            available[key.strip()] = int(value)
+                        except ValueError:
+                            available[key.strip()] = value
+                    else:
+                        available[key.strip()] = value
+                idea_obj["available"] = available
+                
+            # Extract modifier if present
+            modifier_match = re.search(r'modifier\s*=\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}', idea_body, re.DOTALL)
+            if modifier_match:
+                modifier_content = modifier_match.group(1)
+                modifier = {}
+                # Extract modifier properties
+                mod_properties = re.findall(r'^\s*([a-zA-Z0-9_]+)\s*=\s*([^\n\r]+)', modifier_content, re.MULTILINE)
+                for key, value in mod_properties:
+                    # Convert value to appropriate type
+                    value = value.strip().strip('"')
+                    if value.lower() in ['yes', 'no']:
+                        modifier[key.strip()] = value.lower() == 'yes'
+                    elif '.' in value or 'inf' in value.lower() or '-inf' in value.lower():
+                        try:
+                            modifier[key.strip()] = float(value)
+                        except ValueError:
+                            modifier[key.strip()] = value
+                    elif value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                        try:
+                            modifier[key.strip()] = int(value)
+                        except ValueError:
+                            modifier[key.strip()] = value
+                    else:
+                        modifier[key.strip()] = value
+                idea_obj["modifier"] = modifier
+            
+            ideas_data["dynamic"].append(idea_obj)
     
     return ideas_data

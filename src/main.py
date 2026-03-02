@@ -505,6 +505,259 @@ class StatesTab(QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
 
+class StatePropertiesTab(QWidget):
+    def __init__(self, mw: "MainWindow"):
+        super().__init__()
+        self.mw = mw
+        layout = QVBoxLayout(self)
+
+        # Input for state ID
+        id_layout = QHBoxLayout()
+        id_layout.addWidget(QLabel("State ID:"))
+        self.state_id_input = QLineEdit()
+        self.load_button = QPushButton("Load")
+        self.load_button.clicked.connect(self.load_state_properties)
+        id_layout.addWidget(self.state_id_input)
+        id_layout.addWidget(self.load_button)
+        layout.addLayout(id_layout)
+
+        # Properties form
+        form_layout = QFormLayout()
+        
+        # Owner
+        self.owner_input = QLineEdit()
+        form_layout.addRow("Owner (TAG):", self.owner_input)
+        
+        # Name
+        self.name_input = QLineEdit()
+        form_layout.addRow("Name:", self.name_input)
+        
+        # Is Demilitarized Zone
+        self.is_dz_checkbox = QCheckBox("Is Demilitarized Zone")
+        form_layout.addRow("", self.is_dz_checkbox)
+        
+        # Cores (comma-separated list)
+        self.cores_input = QLineEdit()
+        form_layout.addRow("Cores (comma-separated TAGs):", self.cores_input)
+        
+        # Victory points
+        self.victory_points_input = QLineEdit()
+        form_layout.addRow("Victory Points:", self.victory_points_input)
+        
+        # Manpower
+        self.manpower_input = QLineEdit()
+        form_layout.addRow("Manpower:", self.manpower_input)
+        
+        # Building slots
+        self.buildings_max_level_factor_input = QLineEdit()
+        form_layout.addRow("Buildings Max Level Factor:", self.buildings_max_level_factor_input)
+        
+        layout.addLayout(form_layout)
+
+        # Save button
+        self.save_button = QPushButton("Save Changes")
+        self.save_button.clicked.connect(self.save_state_properties)
+        layout.addWidget(self.save_button)
+
+        # Status label
+        self.status_label = QLabel("")
+        layout.addWidget(self.status_label)
+
+    def load_state_properties(self):
+        """Load the properties of a state by ID"""
+        if not self.mw.paths:
+            self.status_label.setText("Error: Load project first")
+            return
+            
+        state_id_text = self.state_id_input.text().strip()
+        if not state_id_text:
+            self.status_label.setText("Error: Enter a state ID")
+            return
+            
+        try:
+            state_id = int(state_id_text)
+        except ValueError:
+            self.status_label.setText("Error: Invalid state ID")
+            return
+
+        # Find the state file in the mod directory first, then in vanilla
+        state_file = None
+        mod_states_dir = self.mw.paths.mod_root / "history/states"
+        vanilla_states_dir = self.mw.paths.hoi4_install / "history/states"
+        
+        # First try to find in mod
+        state_file = find_state_file_in_dir(mod_states_dir, state_id)
+        if not state_file:
+            # Then try vanilla
+            state_file = find_state_file_in_dir(vanilla_states_dir, state_id)
+            
+        if not state_file:
+            self.status_label.setText(f"Error: State {state_id} not found")
+            return
+
+        # Read the state file and extract properties
+        try:
+            state_content = state_file.read_text(encoding="utf-8", errors="ignore")
+            
+            # Extract basic properties
+            owner_match = re.search(r'owner\s*=\s*"?([A-Z0-9]{3})"?', state_content)
+            name_match = re.search(r'name\s*=\s*"([^"]+)"', state_content)
+            is_dz_match = re.search(r'is_damaged_zone\s*=\s*(yes|no)', state_content)
+            cores_matches = re.findall(r'add_core_of\s*=\s*"?([A-Z0-9]{3})"?', state_content)
+            vp_match = re.search(r'victory_points\s*=\s*\{\s*\d+\s+([^}\s]+)', state_content)
+            manpower_match = re.search(r'manpower\s*=\s*([0-9.]+)', state_content)
+            buildings_match = re.search(r'buildings_max_level_factor\s*=\s*([0-9.]+)', state_content)
+            
+            # Populate the form
+            self.owner_input.setText(owner_match.group(1) if owner_match else "")
+            self.name_input.setText(name_match.group(1) if name_match else "")
+            self.is_dz_checkbox.setChecked(is_dz_match.group(1) == "yes" if is_dz_match else False)
+            self.cores_input.setText(",".join(cores_matches) if cores_matches else "")
+            self.victory_points_input.setText(vp_match.group(1) if vp_match else "")
+            self.manpower_input.setText(manpower_match.group(1) if manpower_match else "")
+            self.buildings_max_level_factor_input.setText(buildings_match.group(1) if buildings_match else "")
+            
+            self.status_label.setText(f"Successfully loaded state {state_id}")
+            
+        except Exception as e:
+            self.status_label.setText(f"Error reading state file: {str(e)}")
+
+    def save_state_properties(self):
+        """Save the modified state properties back to the file"""
+        if not self.mw.paths:
+            self.status_label.setText("Error: Load project first")
+            return
+            
+        state_id_text = self.state_id_input.text().strip()
+        if not state_id_text:
+            self.status_label.setText("Error: Enter a state ID")
+            return
+            
+        try:
+            state_id = int(state_id_text)
+        except ValueError:
+            self.status_label.setText("Error: Invalid state ID")
+            return
+
+        # Ensure the state exists in the mod (copy from vanilla if needed)
+        state_file = ensure_state_in_mod(self.mw.paths.mod_root, self.mw.paths.hoi4_install, state_id)
+        if not state_file:
+            self.status_label.setText(f"Error: Could not find or create state {state_id}")
+            return
+
+        try:
+            # Read the current content
+            state_content = state_file.read_text(encoding="utf-8", errors="ignore")
+            
+            # Modify the content with the new values
+            new_content = state_content
+            
+            # Update owner
+            owner_value = self.owner_input.text().strip()
+            if owner_value:
+                if re.search(r'owner\s*=', new_content):
+                    new_content = re.sub(r'owner\s*=\s*"?[A-Z0-9]{3}"?', f'owner = "{owner_value}"', new_content)
+                else:
+                    # Add owner to the history block if it exists
+                    history_match = re.search(r'(history\s*=\s*\{)', new_content)
+                    if history_match:
+                        pos = history_match.end()
+                        new_content = new_content[:pos] + f'\n\towner = "{owner_value}"' + new_content[pos:]
+                    else:
+                        # Create history block if it doesn't exist
+                        new_content += f'\nhistory = {{\n\towner = "{owner_value}"\n}}\n'
+            else:
+                # Remove owner if empty
+                new_content = re.sub(r'owner\s*=\s*"?[A-Z0-9]{3}"?\n?', '', new_content)
+            
+            # Update name
+            name_value = self.name_input.text().strip()
+            if name_value:
+                if re.search(r'name\s*=', new_content):
+                    new_content = re.sub(r'name\s*=\s*"([^"]*)"', f'name = "{name_value}"', new_content)
+                else:
+                    # Add name to the beginning of the state definition
+                    new_content = f'name = "{name_value}"\n' + new_content
+            else:
+                # Remove name if empty
+                new_content = re.sub(r'name\s*=\s*"([^"]*)"\n?', '', new_content)
+            
+            # Update demilitarized zone status
+            is_dz_value = "yes" if self.is_dz_checkbox.isChecked() else "no"
+            if re.search(r'is_damaged_zone\s*=', new_content):
+                new_content = re.sub(r'is_damaged_zone\s*=\s*(yes|no)', f'is_damaged_zone = {is_dz_value}', new_content)
+            else:
+                # Add is_damaged_zone property to the state
+                new_content = f'is_damaged_zone = {is_dz_value}\n' + new_content
+            
+            # Update cores
+            cores_text = self.cores_input.text().strip()
+            if cores_text:
+                cores_list = [tag.strip().upper() for tag in cores_text.split(",") if tag.strip()]
+                
+                # Remove all existing core additions
+                new_content = re.sub(r'add_core_of\s*=\s*"?[A-Z0-9]{3}"?\n?', '', new_content)
+                
+                # Add the new cores
+                history_match = re.search(r'(history\s*=\s*\{)', new_content)
+                if history_match:
+                    pos = history_match.end()
+                    for core in cores_list:
+                        new_content = new_content[:pos] + f'\n\tadd_core_of = "{core}"' + new_content[pos:]
+                else:
+                    # Create history block if it doesn't exist
+                    if cores_list:
+                        history_part = '\nhistory = {'
+                        for core in cores_list:
+                            history_part += f'\n\tadd_core_of = "{core}"'
+                        history_part += '\n}'
+                        new_content += history_part
+            
+            # Update victory points
+            vp_value = self.victory_points_input.text().strip()
+            if vp_value:
+                if re.search(r'victory_points\s*=', new_content):
+                    new_content = re.sub(r'victory_points\s*=\s*\{\s*\d+\s+[^\}]+\}', f'victory_points = {{ 1 {vp_value} }}', new_content)
+                else:
+                    # Add victory points to the state
+                    new_content = f'victory_points = {{ 1 {vp_value} }}\n' + new_content
+            else:
+                # Remove victory points if empty
+                new_content = re.sub(r'victory_points\s*=\s*\{[^\}]*\}\n?', '', new_content)
+            
+            # Update manpower
+            manpower_value = self.manpower_input.text().strip()
+            if manpower_value:
+                if re.search(r'manpower\s*=', new_content):
+                    new_content = re.sub(r'manpower\s*=\s*[0-9.]+', f'manpower = {manpower_value}', new_content)
+                else:
+                    # Add manpower to the state
+                    new_content = f'manpower = {manpower_value}\n' + new_content
+            else:
+                # Remove manpower if empty
+                new_content = re.sub(r'manpower\s*=\s*[0-9.]+\n?', '', new_content)
+            
+            # Update buildings max level factor
+            buildings_value = self.buildings_max_level_factor_input.text().strip()
+            if buildings_value:
+                if re.search(r'buildings_max_level_factor\s*=', new_content):
+                    new_content = re.sub(r'buildings_max_level_factor\s*=\s*[0-9.]+', f'buildings_max_level_factor = {buildings_value}', new_content)
+                else:
+                    # Add buildings max level factor to the state
+                    new_content = f'buildings_max_level_factor = {buildings_value}\n' + new_content
+            else:
+                # Remove buildings max level factor if empty
+                new_content = re.sub(r'buildings_max_level_factor\s*=\s*[0-9.]+\n?', '', new_content)
+            
+            # Write the updated content back to the file
+            state_file.write_text(new_content, encoding="utf-8")
+            
+            self.status_label.setText(f"Successfully saved changes to state {state_id}")
+            
+        except Exception as e:
+            self.status_label.setText(f"Error saving state file: {str(e)}")
+
+
 class StateBrowserTab(QWidget):
     def __init__(self, mw:"MainWindow"):
         super().__init__()
@@ -1539,6 +1792,7 @@ class MainWindow(QMainWindow):
         self.project=ProjectTab(self)
         self.country=CountryTab(self)
         self.states=StatesTab(self)
+        self.state_props=StatePropertiesTab(self)
         self.browser=StateBrowserTab(self)
         self.events=EventBuilderTab(self)
         self.focus=FocusTab(self)
@@ -1547,6 +1801,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.project,"Project")
         tabs.addTab(self.country,"Country Builder")
         tabs.addTab(self.states,"States (IDs)")
+        tabs.addTab(self.state_props,"State Properties")
         tabs.addTab(self.browser,"State Browser")
         tabs.addTab(self.events,"Event Builder")
         tabs.addTab(self.focus,"Focus Tree Editor")

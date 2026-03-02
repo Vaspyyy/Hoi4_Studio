@@ -47,6 +47,9 @@ from .utils import (
     nuclear_delete_mod, import_flag_to_mod, _have_magick, 
     import_portrait_to_mod
 )
+from .ideas import (
+    write_ideas_file, write_dynamic_ideas_file, read_ideas_file
+)
 
 
 COLOR_RE = re.compile(r"\bcolor\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}")
@@ -761,6 +764,200 @@ class FocusLinkItem(QGraphicsItem):
         return super().itemChange(change, value)
 
 
+class IdeasTab(QWidget):
+    def __init__(self, mw: "MainWindow"):
+        super().__init__()
+        self.mw = mw
+        layout = QVBoxLayout(self)
+
+        # Top row for country selection
+        rowpick = QHBoxLayout()
+        self.tag_picker = QComboBox()
+        btn_reload = QPushButton("Reload Tags"); btn_reload.clicked.connect(self.reload_tags)
+        btn_load = QPushButton("Load"); btn_load.clicked.connect(self.load_selected)
+        rowpick.addWidget(QLabel("Country")); rowpick.addWidget(self.tag_picker); rowpick.addWidget(btn_reload); rowpick.addWidget(btn_load)
+        layout.addLayout(rowpick)
+
+        # Main form layout for ideas
+        form_layout = QFormLayout()
+
+        # Idea ID
+        self.idea_id = QLineEdit("generic_idea")
+        form_layout.addRow("Idea ID", self.idea_id)
+
+        # Idea Name
+        self.idea_name = QLineEdit("Generic Idea")
+        form_layout.addRow("Idea Name", self.idea_name)
+
+        # Icon
+        self.icon = QLineEdit(" GFX_idea_generic")
+        form_layout.addRow("Icon", self.icon)
+
+        # Modifiers section
+        layout.addLayout(form_layout)
+        layout.addWidget(QLabel("Modifiers"))
+
+        # Economic modifiers
+        self.mod_production_speed = QLineEdit("0.10")
+        self.mod_industrial_capacity_factory = QLineEdit("0.05")
+        self.mod_consumer_goods_factor = QLineEdit("-0.10")
+
+        economic_layout = QGridLayout()
+        economic_layout.addWidget(QLabel("Production Speed"), 0, 0); economic_layout.addWidget(self.mod_production_speed, 0, 1)
+        economic_layout.addWidget(QLabel("Factory Industrial Capacity"), 1, 0); economic_layout.addWidget(self.mod_industrial_capacity_factory, 1, 1)
+        economic_layout.addWidget(QLabel("Consumer Goods Factor"), 2, 0); economic_layout.addWidget(self.mod_consumer_goods_factor, 2, 1)
+
+        layout.addLayout(economic_layout)
+
+        # Political modifiers
+        self.mod_political_power_gain = QLineEdit("0.25")
+        self.mod_stability_factor = QLineEdit("0.10")
+        self.mod_war_support_factor = QLineEdit("0.05")
+
+        political_layout = QGridLayout()
+        political_layout.addWidget(QLabel("Political Power Gain"), 0, 0); political_layout.addWidget(self.mod_political_power_gain, 0, 1)
+        political_layout.addWidget(QLabel("Stability Factor"), 1, 0); political_layout.addWidget(self.mod_stability_factor, 1, 1)
+        political_layout.addWidget(QLabel("War Support Factor"), 2, 0); political_layout.addWidget(self.mod_war_support_factor, 2, 1)
+
+        layout.addLayout(political_layout)
+
+        # Military modifiers
+        self.mod_army_attack_factor = QLineEdit("0.10")
+        self.mod_army_defence_factor = QLineEdit("0.10")
+        self.mod_planning_speed = QLineEdit("0.25")
+
+        military_layout = QGridLayout()
+        military_layout.addWidget(QLabel("Army Attack Factor"), 0, 0); military_layout.addWidget(self.mod_army_attack_factor, 0, 1)
+        military_layout.addWidget(QLabel("Army Defense Factor"), 1, 0); military_layout.addWidget(self.mod_army_defence_factor, 1, 1)
+        military_layout.addWidget(QLabel("Planning Speed"), 2, 0); military_layout.addWidget(self.mod_planning_speed, 2, 1)
+
+        layout.addLayout(military_layout)
+
+        # Ideas list
+        self.ideas_list = QListWidget()
+        layout.addWidget(QLabel("Current Ideas"))
+        layout.addWidget(self.ideas_list)
+
+        # Buttons
+        btn_add = QPushButton("Add Idea"); btn_add.clicked.connect(self.add_idea)
+        btn_remove = QPushButton("Remove Selected"); btn_remove.clicked.connect(self.remove_idea)
+        btn_generate = QPushButton("Generate / Update Ideas"); btn_generate.clicked.connect(self.generate)
+        btn_clear = QPushButton("Clear All Ideas"); btn_clear.clicked.connect(self.clear_ideas)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(btn_add)
+        button_layout.addWidget(btn_remove)
+        button_layout.addWidget(btn_generate)
+        button_layout.addWidget(btn_clear)
+        layout.addLayout(button_layout)
+
+        self.reload_tags()
+
+    def reload_tags(self):
+        self.tag_picker.clear()
+        self.tag_picker.addItem("(none)")
+        if not self.mw.paths: return
+        for t in load_mod_tags(self.mw.paths.mod_root):
+            self.tag_picker.addItem(t)
+
+    def load_selected(self):
+        if not self.mw.paths: return
+        tag = self.tag_picker.currentText().strip().upper()
+        if not tag or tag == "(none)": return
+        # Load existing ideas for the selected country
+        ideas_data = read_ideas_file(self.mw.paths.mod_root, tag)
+        # For now, we just clear the list to avoid confusion
+        self.ideas_list.clear()
+        for idea in ideas_data.get("static", []):
+            self.ideas_list.addItem(f"{idea['id']}: {idea['name']}")
+
+    def add_idea(self):
+        idea_id = self.idea_id.text().strip()
+        if not idea_id:
+            QMessageBox.warning(self, "Warning", "Please enter an Idea ID")
+            return
+            
+        # Create idea object from form values
+        idea_obj = {
+            "id": idea_id,
+            "name": self.idea_name.text().strip(),
+            "icon": self.icon.text().strip(),
+            "modifier": {}
+        }
+        
+        # Add modifiers if they're not zero/default
+        modifiers = {
+            "production_speed_factor": float(self.mod_production_speed.text()) if self.mod_production_speed.text() and float(self.mod_production_speed.text()) != 0 else None,
+            "industrial_capacity_factory": float(self.mod_industrial_capacity_factory.text()) if self.mod_industrial_capacity_factory.text() and float(self.mod_industrial_capacity_factory.text()) != 0 else None,
+            "consumer_goods_factor": float(self.mod_consumer_goods_factor.text()) if self.mod_consumer_goods_factor.text() and float(self.mod_consumer_goods_factor.text()) != 0 else None,
+            "political_power_gain": float(self.mod_political_power_gain.text()) if self.mod_political_power_gain.text() and float(self.mod_political_power_gain.text()) != 0 else None,
+            "stability_factor": float(self.mod_stability_factor.text()) if self.mod_stability_factor.text() and float(self.mod_stability_factor.text()) != 0 else None,
+            "war_support_factor": float(self.mod_war_support_factor.text()) if self.mod_war_support_factor.text() and float(self.mod_war_support_factor.text()) != 0 else None,
+            "army_attack_factor": float(self.mod_army_attack_factor.text()) if self.mod_army_attack_factor.text() and float(self.mod_army_attack_factor.text()) != 0 else None,
+            "army_defence_factor": float(self.mod_army_defence_factor.text()) if self.mod_army_defence_factor.text() and float(self.mod_army_defence_factor.text()) != 0 else None,
+            "planning_speed": float(self.mod_planning_speed.text()) if self.mod_planning_speed.text() and float(self.mod_planning_speed.text()) != 0 else None
+        }
+        
+        # Only add non-None modifiers
+        idea_obj["modifier"] = {k: v for k, v in modifiers.items() if v is not None}
+        
+        self.ideas_list.addItem(f"{idea_id}: {self.idea_name.text().strip()}")
+        # Clear form after adding
+        self.clear_form()
+
+    def remove_idea(self):
+        current_row = self.ideas_list.currentRow()
+        if current_row >= 0:
+            self.ideas_list.takeItem(current_row)
+
+    def clear_ideas(self):
+        self.ideas_list.clear()
+
+    def clear_form(self):
+        self.idea_id.setText("")
+        self.idea_name.setText("")
+        self.icon.setText(" GFX_idea_generic")
+        self.mod_production_speed.setText("0.10")
+        self.mod_industrial_capacity_factory.setText("0.05")
+        self.mod_consumer_goods_factor.setText("-0.10")
+        self.mod_political_power_gain.setText("0.25")
+        self.mod_stability_factor.setText("0.10")
+        self.mod_war_support_factor.setText("0.05")
+        self.mod_army_attack_factor.setText("0.10")
+        self.mod_army_defence_factor.setText("0.10")
+        self.mod_planning_speed.setText("0.25")
+
+    def generate(self):
+        if not self.mw.paths:
+            QMessageBox.critical(self, "Error", "Load project first"); return
+        tag = self.tag_picker.currentText().strip().upper()
+        if not tag or tag == "(none)":
+            QMessageBox.critical(self, "Error", "Select a valid country tag"); return
+
+        try:
+            # Create list of idea objects from the list
+            ideas_data = []
+            for i in range(self.ideas_list.count()):
+                item_text = self.ideas_list.item(i).text()
+                # For simplicity, we'll create basic idea objects
+                # In a real implementation, you'd store the full idea objects in the list
+                idea_id = item_text.split(":")[0] if ":" in item_text else item_text
+                ideas_data.append({
+                    "id": idea_id,
+                    "icon": " GFX_idea_generic",
+                    "modifier": {
+                        "production_speed_factor": 0.10,
+                        "political_power_gain": 0.25
+                    }
+                })
+
+            # Write the ideas file
+            write_ideas_file(self.mw.paths.mod_root, tag, ideas_data)
+            QMessageBox.information(self, "Success", f"Ideas generated for {tag}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+
 class FocusTab(QWidget):
     def __init__(self, mw:"MainWindow"):
         super().__init__()
@@ -1223,6 +1420,7 @@ class MainWindow(QMainWindow):
         self.browser=StateBrowserTab(self)
         self.events=EventBuilderTab(self)
         self.focus=FocusTab(self)
+        self.ideas=IdeasTab(self)
         self.loc_manager=LocalizationManagerTab(self)
         tabs.addTab(self.project,"Project")
         tabs.addTab(self.country,"Country Builder")
@@ -1230,6 +1428,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.browser,"State Browser")
         tabs.addTab(self.events,"Event Builder")
         tabs.addTab(self.focus,"Focus Tree Editor")
+        tabs.addTab(self.ideas,"Ideas/National Spirit")
         tabs.addTab(self.loc_manager,"Localization Manager")
 
     def refresh_all_tag_dropdowns(self):
@@ -1237,6 +1436,7 @@ class MainWindow(QMainWindow):
         self.states.reload_tags()
         self.browser.reload_tags()
         self.focus.reload_tags()
+        self.ideas.reload_tags()
         # Refresh localization when tags are reloaded
         if hasattr(self, 'loc_manager'):
             self.loc_manager.refresh_localization_entries()

@@ -31,7 +31,6 @@ from .settings import (
     load_settings,
     save_settings,
     save_editor_state,
-    load_editor_state,
 )
 from .theme import (
     apply_theme,

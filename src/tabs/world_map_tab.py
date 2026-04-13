@@ -11,6 +11,7 @@ import csv
 import re
 import subprocess
 from colorsys import hsv_to_rgb
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -40,6 +41,49 @@ from ..theme import AnimatedButton, create_card_widget, create_section_title
 
 if TYPE_CHECKING:
     from ..main import MainWindow
+
+
+def _fingerprint(path: Path) -> Optional[tuple[float, int]]:
+    try:
+        st = path.stat()
+        return (st.st_mtime, st.st_size)
+    except OSError:
+        return None
+
+
+def _fingerprint_dir(d: Path) -> Optional[tuple]:
+    if not d.is_dir():
+        return None
+    entries = []
+    try:
+        for f in sorted(d.rglob("*")):
+            if f.is_file():
+                st = f.stat()
+                entries.append((str(f), st.st_mtime, st.st_size))
+    except OSError:
+        return None
+    return tuple(entries)
+
+
+@dataclass
+class _MapCache:
+    provinces_arr: Optional[np.ndarray] = None
+    provinces_fp: Optional[tuple] = None
+    rgb_to_prov: Optional[dict] = None
+    definition_fp: Optional[tuple] = None
+    prov_to_state: Optional[dict] = None
+    state_owner: Optional[dict] = None
+    state_names: Optional[dict] = None
+    states_fp: Optional[tuple] = None
+    localisation: Optional[dict] = None
+    loc_fp: Optional[tuple] = None
+    ocean_texture: Optional[np.ndarray] = None
+    ocean_fp: Optional[tuple] = None
+    rivers_mask: Optional[np.ndarray] = None
+    rivers_fp: Optional[tuple] = None
+    border_mask: Optional[np.ndarray] = None
+    country_colors: Optional[dict] = None
+    colors_fp: Optional[tuple] = None
 
 
 def _parse_definition_csv(path: Path) -> dict[tuple[int, int, int], int]:
@@ -344,6 +388,7 @@ class MapRenderWorker(QThread):
         mod_root: Optional[Path] = None,
         hoi4_install: Optional[Path] = None,
         loc_dirs: Optional[list[Path]] = None,
+        cache: Optional[_MapCache] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -354,6 +399,7 @@ class MapRenderWorker(QThread):
         self.mod_root = mod_root
         self.hoi4_install = hoi4_install
         self.loc_dirs = loc_dirs or []
+        self._cache = cache
 
         self.provinces_arr: Optional[np.ndarray] = None
         self.rgb_to_prov: dict = {}
@@ -363,19 +409,35 @@ class MapRenderWorker(QThread):
         self.clean_arr: Optional[np.ndarray] = None
         self.bordered_arr: Optional[np.ndarray] = None
         self.rivers_mask: Optional[np.ndarray] = None
+        self.ocean_texture: Optional[np.ndarray] = None
+        self._border_mask_result: Optional[np.ndarray] = None
 
     def run(self) -> None:
         try:
-            rgb_to_prov = _parse_definition_csv(self.definition_csv_path)
-            state_owner, prov_to_state, state_names_raw = _parse_state_owners(self.states_dirs)
+            cache = self._cache
 
-            loc = self._resolve_localisation()
-            state_names = {}
-            for sid, key in state_names_raw.items():
-                state_names[sid] = loc.get(key, key)
+            if cache and cache.rgb_to_prov is not None:
+                rgb_to_prov = cache.rgb_to_prov
+            else:
+                rgb_to_prov = _parse_definition_csv(self.definition_csv_path)
 
-            img = Image.open(self.provinces_bmp_path).convert("RGB")
-            self.provinces_arr = np.array(img, dtype=np.uint8)
+            if cache and cache.state_owner is not None:
+                state_owner = cache.state_owner
+                prov_to_state = cache.prov_to_state
+                state_names = cache.state_names
+            else:
+                state_owner, prov_to_state, state_names_raw = _parse_state_owners(self.states_dirs)
+                loc = self._resolve_localisation()
+                state_names = {}
+                for sid, key in state_names_raw.items():
+                    state_names[sid] = loc.get(key, key)
+
+            if cache and cache.provinces_arr is not None:
+                self.provinces_arr = cache.provinces_arr
+            else:
+                img = Image.open(self.provinces_bmp_path).convert("RGB")
+                self.provinces_arr = np.array(img, dtype=np.uint8)
+
             h, w = self.provinces_arr.shape[:2]
 
             self.rgb_to_prov = rgb_to_prov
@@ -383,9 +445,13 @@ class MapRenderWorker(QThread):
             self.prov_to_state = prov_to_state
             self.state_names = state_names
 
-            ocean_texture = None
-            if self.mod_root:
+            if cache and cache.ocean_texture is not None:
+                ocean_texture = cache.ocean_texture
+            elif self.mod_root:
                 ocean_texture = _load_water_texture(self.mod_root, h, w, self.hoi4_install)
+            else:
+                ocean_texture = None
+            self.ocean_texture = ocean_texture
 
             def _progress(current, total):
                 self.progress.emit(current, total)
@@ -400,11 +466,21 @@ class MapRenderWorker(QThread):
                 ocean_texture=ocean_texture,
             )
 
-            bordered_arr = self._compute_bordered(
-                result_arr, self.provinces_arr, rgb_to_prov, prov_to_state
-            )
+            if cache and cache.border_mask is not None and cache.provinces_arr is not None:
+                bordered = result_arr.copy()
+                bordered[cache.border_mask, 0] = 20
+                bordered[cache.border_mask, 1] = 20
+                bordered[cache.border_mask, 2] = 20
+                bordered_arr = bordered
+            else:
+                bordered_arr, border_mask = self._compute_bordered(
+                    result_arr, self.provinces_arr, rgb_to_prov, prov_to_state
+                )
+                self._border_mask_result = border_mask
 
-            if self.mod_root:
+            if cache and cache.rivers_mask is not None:
+                self.rivers_mask = cache.rivers_mask
+            elif self.mod_root:
                 self.rivers_mask = _load_rivers_mask(self.mod_root, h, w)
 
             self.clean_arr = result_arr
@@ -437,7 +513,7 @@ class MapRenderWorker(QThread):
         provinces_arr: np.ndarray,
         rgb_to_prov: dict[tuple[int, int, int], int],
         prov_to_state: dict[int, int],
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
         h, w = result_arr.shape[:2]
 
         state_lut = np.full((256, 256, 256), -1, dtype=np.int32)
@@ -459,7 +535,7 @@ class MapRenderWorker(QThread):
         bordered[border, 1] = 20
         bordered[border, 2] = 20
 
-        return bordered
+        return bordered, border
 
 
 class MapGraphicsView(QGraphicsView):
@@ -856,6 +932,7 @@ class WorldMapTab(QWidget):
         self._provinces_bmp_path: Optional[Path] = None
         self._definition_csv_path: Optional[Path] = None
         self._country_colors: dict[str, tuple[int, int, int]] = {}
+        self._cache = _MapCache()
         self._fake_timer = QTimer(self)
         self._fake_timer.setInterval(40)
         self._fake_progress = 0
@@ -1061,6 +1138,69 @@ class WorldMapTab(QWidget):
 
         country_colors = self._load_country_colors()
 
+        c = self._cache
+        prov_fp = _fingerprint(self._provinces_bmp_path)
+        def_fp = _fingerprint(self._definition_csv_path)
+
+        states_fp = tuple(_fingerprint_dir(d) for d in states_dirs)
+        loc_fp = tuple(_fingerprint_dir(d) for d in loc_dirs)
+
+        ocean_fp = None
+        if mod_root:
+            ocean_fp = _fingerprint(mod_root / "map" / "terrain" / "colormap_water_0.dds")
+        if ocean_fp is None and hoi4_install:
+            ocean_fp = _fingerprint(hoi4_install / "map" / "terrain" / "colormap_water_0.dds")
+
+        rivers_fp = None
+        if mod_root:
+            rivers_fp = _fingerprint(mod_root / "map" / "rivers.bmp")
+
+        colors_dirs = []
+        if hoi4_install:
+            colors_dirs.append(hoi4_install / "common" / "country_tags")
+            colors_dirs.append(hoi4_install / "common" / "countries")
+        if mod_root:
+            colors_dirs.append(mod_root / "common" / "country_tags")
+            colors_dirs.append(mod_root / "common" / "countries")
+        colors_fp = tuple(_fingerprint_dir(d) for d in colors_dirs)
+
+        worker_cache = _MapCache()
+
+        if prov_fp is not None and prov_fp == c.provinces_fp and c.provinces_arr is not None:
+            worker_cache.provinces_arr = c.provinces_arr
+        if def_fp is not None and def_fp == c.definition_fp and c.rgb_to_prov is not None:
+            worker_cache.rgb_to_prov = c.rgb_to_prov
+
+        states_changed = states_fp != c.states_fp
+        if not states_changed and c.state_owner is not None:
+            worker_cache.state_owner = c.state_owner
+            worker_cache.prov_to_state = c.prov_to_state
+            worker_cache.state_names = c.state_names
+
+        if ocean_fp is not None and ocean_fp == c.ocean_fp and c.ocean_texture is not None:
+            worker_cache.ocean_texture = c.ocean_texture
+        if rivers_fp is not None and rivers_fp == c.rivers_fp and c.rivers_mask is not None:
+            worker_cache.rivers_mask = c.rivers_mask
+
+        border_deps_changed = states_changed or (prov_fp != c.provinces_fp)
+        if not border_deps_changed and c.border_mask is not None:
+            worker_cache.border_mask = c.border_mask
+
+        if colors_fp != c.colors_fp:
+            c.country_colors = None
+        if c.country_colors is not None:
+            worker_cache.country_colors = c.country_colors
+
+        self._last_render_fps = {
+            "provinces": prov_fp,
+            "definition": def_fp,
+            "states": states_fp,
+            "loc": loc_fp,
+            "ocean": ocean_fp,
+            "rivers": rivers_fp,
+            "colors": colors_fp,
+        }
+
         self.btn_refresh.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setMaximum(100)
@@ -1077,6 +1217,7 @@ class WorldMapTab(QWidget):
             mod_root=mod_root,
             hoi4_install=hoi4_install,
             loc_dirs=loc_dirs,
+            cache=worker_cache,
         )
         self._worker.finished.connect(self._on_render_finished)
         self._worker.error.connect(self._on_render_error)
@@ -1112,6 +1253,31 @@ class WorldMapTab(QWidget):
                     self._worker.rivers_mask,
                 )
             detected_tags = set(self._worker.state_owner.values())
+
+            c = self._cache
+            fps = getattr(self, "_last_render_fps", {})
+            if "provinces" in fps:
+                c.provinces_fp = fps["provinces"]
+                c.provinces_arr = self._worker.provinces_arr
+            if "definition" in fps:
+                c.definition_fp = fps["definition"]
+                c.rgb_to_prov = self._worker.rgb_to_prov
+            if "states" in fps:
+                c.states_fp = fps["states"]
+                c.state_owner = self._worker.state_owner
+                c.prov_to_state = self._worker.prov_to_state
+                c.state_names = self._worker.state_names
+            if "ocean" in fps:
+                c.ocean_fp = fps["ocean"]
+                c.ocean_texture = self._worker.ocean_texture
+            if "rivers" in fps:
+                c.rivers_fp = fps["rivers"]
+                c.rivers_mask = self._worker.rivers_mask
+            if "colors" in fps:
+                c.colors_fp = fps["colors"]
+                c.country_colors = self._country_colors
+            if self._worker._border_mask_result is not None:
+                c.border_mask = self._worker._border_mask_result
 
         self.legend.update_legend(
             _resolve_colors(self._country_colors, detected_tags), detected_tags

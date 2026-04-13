@@ -1,4 +1,3 @@
-```
 # Compiled Python files
 __pycache__/
 *.pyc
@@ -8,4 +7,23 @@ __pycache__/
 # Build directories
 build/
 dist/
-```
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Config
+*.egg-info/
+*.egg
+
+# Cache
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.opencode/

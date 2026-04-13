@@ -14,13 +14,6 @@ YML_ENTRY_RE = re.compile(r'^\s*([^:#\s]+)\s*:\s*(?:\d+\s*)?\s*"(.*)"\s*$')
 
 
 def append_localisation(path: Path, entries: dict[str, str]) -> None:
-    """
-    Append localisation entries to a file.
-    
-    Args:
-        path: Path to the localisation file
-        entries: Dictionary of key-value pairs to add
-    """
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_text("l_english:\n", encoding="utf-8-sig")
@@ -31,19 +24,56 @@ def append_localisation(path: Path, entries: dict[str, str]) -> None:
         txt = raw.decode("utf-8", errors="ignore")
     if not txt.strip().startswith("l_english:"):
         txt = "l_english:\n" + txt
-    out = txt.rstrip() + "\n"
-    for k, v in entries.items():
-        out += f' {k}:0 "{v}"\n'
+
+    lines = txt.splitlines(keepends=True)
+    keys_to_remove = set(entries.keys())
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        m = YML_ENTRY_RE.match(stripped)
+        if m and m.group(1) in keys_to_remove:
+            keys_to_remove.discard(m.group(1))
+            continue
+        new_lines.append(line)
+
+    out = "".join(new_lines).rstrip() + "\n"
+    for k in sorted(entries):
+        out += f' {k}:0 "{entries[k]}"\n'
+    path.write_text(out, encoding="utf-8-sig")
+
+
+def delete_localisation_keys(path: Path, keys_to_delete: set[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        return
+    raw = path.read_bytes()
+    try:
+        txt = raw.decode("utf-8-sig")
+    except Exception:
+        txt = raw.decode("utf-8", errors="ignore")
+    if not txt.strip().startswith("l_english:"):
+        txt = "l_english:\n" + txt
+
+    lines = txt.splitlines(keepends=True)
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        m = YML_ENTRY_RE.match(stripped)
+        if m and m.group(1) in keys_to_delete:
+            continue
+        new_lines.append(line)
+
+    out = "".join(new_lines).rstrip() + "\n"
     path.write_text(out, encoding="utf-8-sig")
 
 
 def parse_english_localisation(loc_english_dir: Path) -> dict[str, str]:
     """
     Parse English localisation files in a directory.
-    
+
     Args:
         loc_english_dir: Directory containing localisation files
-        
+
     Returns:
         Dictionary mapping localisation keys to values
     """

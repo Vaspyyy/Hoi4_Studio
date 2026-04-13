@@ -12,10 +12,10 @@ from pathlib import Path
 def find_mods_in_user_mod_folder(user_mods_dir: Path):
     """
     Find mod files in the user mod folder.
-    
+
     Args:
         user_mods_dir: Path to the user mod directory
-        
+
     Returns:
         List of tuples containing (filename, path) for each mod
     """

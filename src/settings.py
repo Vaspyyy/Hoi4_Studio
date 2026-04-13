@@ -1,13 +1,11 @@
 """
 HOI4 Modding Studio - Settings Management
-
-This module handles application settings and configuration.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 
@@ -17,23 +15,26 @@ SETTINGS_FILE = APP_DIR / "settings.json"
 
 @dataclass
 class AppSettings:
-    """Application settings data class."""
     hoi4_install: str = ""
     user_mods: str = ""
     mod_root: str = ""
     last_mod_descriptor: str = ""
+    theme: str = "dark"
+    autosave_interval_seconds: int = 120
+    recent_projects: list[str] = field(default_factory=list)
+    window_width: int = 1400
+    window_height: int = 850
+    editor_state_file: str = ""
 
 
 @dataclass
 class HOI4Paths:
-    """Paths for HOI4 installation and mod directories."""
     hoi4_install: Path
     hoi4_user_mods: Path
     mod_root: Path
 
 
 def load_settings() -> AppSettings:
-    """Load application settings from file."""
     APP_DIR.mkdir(parents=True, exist_ok=True)
     if not SETTINGS_FILE.exists():
         return AppSettings()
@@ -49,6 +50,21 @@ def load_settings() -> AppSettings:
 
 
 def save_settings(s: AppSettings) -> None:
-    """Save application settings to file."""
     APP_DIR.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(json.dumps(asdict(s), indent=2), encoding="utf-8")
+
+
+def save_editor_state(state: dict) -> None:
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    p = APP_DIR / "editor_state.json"
+    p.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+
+
+def load_editor_state() -> dict:
+    p = APP_DIR / "editor_state.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}

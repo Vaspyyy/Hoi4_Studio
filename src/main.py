@@ -8,15 +8,18 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QTimer, Signal, QEvent, QObject
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QMainWindow,
     QPushButton,
     QScrollArea,
+    QSlider,
+    QSpinBox,
     QStatusBar,
     QLabel,
     QMessageBox,
@@ -361,8 +364,21 @@ class MainWindow(QMainWindow):
         return result
 
 
+class _NoScrollFilter(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Wheel and isinstance(obj, (QComboBox, QSpinBox, QSlider)):
+            if not obj.hasFocus():
+                event.ignore()
+                return True
+        return False
+
+
 def main():
     app = QApplication([])
+
+    no_scroll = _NoScrollFilter()
+    app.installEventFilter(no_scroll)
+
     w = MainWindow()
 
     w.tabs.setCurrentIndex(0)

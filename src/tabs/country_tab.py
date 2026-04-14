@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -41,6 +42,61 @@ COLOR_RE = re.compile(r"\bcolor\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}")
 CAPITAL_RE = re.compile(r"\bcapital\s*=\s*(\d+)")
 POP_RE = re.compile(r"\b(democratic|fascism|communism|neutrality)\s*=\s*(\d+)")
 RULING_PARTY_RE = re.compile(r"\bruling_party\s*=\s*(\w+)")
+IDEOLOGY_RE = re.compile(r"\bideology\s*=\s*(\w+)")
+
+
+def _parse_ideologies(
+    hoi4_install: Optional[Path], mod_root: Optional[Path]
+) -> dict[str, list[str]]:
+    from ..parser import parse_pdx
+    from ..localisation import parse_english_localisation
+
+    groups: dict[str, list[str]] = {}
+
+    for base in [hoi4_install, mod_root]:
+        if base is None:
+            continue
+        ideologies_dir = base / "common" / "ideologies"
+        if not ideologies_dir.is_dir():
+            continue
+        for f in sorted(ideologies_dir.glob("*.txt")):
+            try:
+                txt = f.read_text(encoding="utf-8", errors="ignore")
+                root = parse_pdx(txt)
+            except Exception:
+                continue
+            ideologies_node = root.find("ideologies")
+            if not ideologies_node or not ideologies_node.is_block():
+                continue
+            for group_node in ideologies_node.children:
+                if not group_node.key or group_node.is_comment:
+                    continue
+                group_name = group_node.key
+                types_node = group_node.find("types")
+                if not types_node or not types_node.is_block():
+                    continue
+                subs = []
+                for type_node in types_node.children:
+                    if type_node.key and not type_node.is_comment:
+                        subs.append(type_node.key)
+                groups[group_name] = subs
+
+    loc: dict[str, str] = {}
+    for base in [hoi4_install, mod_root]:
+        if base is None:
+            continue
+        loc_dir = base / "localisation" / "english"
+        loc.update(parse_english_localisation(loc_dir))
+
+    return groups
+
+
+def _resolve_sub_ideology_tooltip(sub_name: str, loc: dict[str, str]) -> str:
+    desc = loc.get(f"{sub_name}_desc", "")
+    display = loc.get(sub_name, sub_name)
+    if desc:
+        return f"{display}: {desc}"
+    return display
 
 
 def read_country_definition(mod_root: Path, tag: str) -> dict:
@@ -118,11 +174,31 @@ def read_country_localisation(mod_root: Path, tag: str) -> dict:
     return {}
 
 
+def read_character_ideology(mod_root: Path, tag: str) -> str:
+    p = mod_root / f"common/characters/{tag}_characters.txt"
+    if not p.exists():
+        return ""
+    txt = p.read_text(encoding="utf-8", errors="ignore")
+    m = IDEOLOGY_RE.search(txt)
+    return m.group(1) if m else ""
+
+
+def read_character_leader_name(mod_root: Path, tag: str) -> str:
+    p = mod_root / f"common/characters/{tag}_characters.txt"
+    if not p.exists():
+        return ""
+    txt = p.read_text(encoding="utf-8", errors="ignore")
+    m = re.search(r'name\s*=\s*"([^"]*)"', txt)
+    return m.group(1) if m else ""
+
+
 class CountryTab(QWidget):
     def __init__(self, mw: "MainWindow"):
         super().__init__()
         self.mw = mw
         self._normalizing = False
+        self._ideology_groups: dict[str, list[str]] = {}
+        self._ideology_loc: dict[str, str] = {}
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
@@ -202,8 +278,15 @@ class CountryTab(QWidget):
         self.ruling_party = QComboBox()
         self.ruling_party.addItems(["democratic", "neutrality", "fascism", "communism"])
         self.ruling_party.setToolTip("Which ideology holds power at game start")
+        self.ruling_party.currentTextChanged.connect(self._update_sub_ideologies)
         layout.addWidget(QLabel("Ruling Party"))
         layout.addWidget(self.ruling_party)
+
+        self.leader_ideology = QComboBox()
+        self._update_sub_ideologies("democratic")
+        self.leader_ideology.setToolTip("Leader's sub-ideology. Must match the ruling party group.")
+        layout.addWidget(QLabel("Leader Sub-Ideology"))
+        layout.addWidget(self.leader_ideology)
 
         layout.addWidget(QLabel("Flag"))
         rf = QHBoxLayout()
@@ -237,6 +320,29 @@ class CountryTab(QWidget):
         r, g, b = color
         self.color_preview.setText(f"{r},{g},{b}")
         self.color_swatch.set_color(r, g, b)
+
+    def _update_sub_ideologies(self, ruling_party: str) -> None:
+        current = self.leader_ideology.currentText()
+        self.leader_ideology.blockSignals(True)
+        self.leader_ideology.clear()
+        subs = self._ideology_groups.get(ruling_party, [])
+        for sub_name in subs:
+            tooltip = _resolve_sub_ideology_tooltip(sub_name, self._ideology_loc)
+            self.leader_ideology.addItem(sub_name)
+            idx = self.leader_ideology.count() - 1
+            self.leader_ideology.setItemData(idx, tooltip, Qt.ItemDataRole.ToolTipRole)
+        restore_idx = self.leader_ideology.findText(current)
+        if restore_idx >= 0:
+            self.leader_ideology.setCurrentIndex(restore_idx)
+        self.leader_ideology.blockSignals(False)
+        self.leader_ideology.setToolTip(
+            self.leader_ideology.currentData(Qt.ItemDataRole.ToolTipRole) or ""
+        )
+        self.leader_ideology.currentIndexChanged.connect(
+            lambda: self.leader_ideology.setToolTip(
+                self.leader_ideology.currentData(Qt.ItemDataRole.ToolTipRole) or ""
+            )
+        )
 
     def normalize(self, ideology: str = "", val: int = 0):
         if self._normalizing:
@@ -301,6 +407,18 @@ class CountryTab(QWidget):
             return
         for t in load_mod_tags(self.mw.paths.mod_root):
             self.tag_picker.addItem(t)
+        hoi4 = self.mw.paths.hoi4_install if self.mw.paths else None
+        mod = self.mw.paths.mod_root if self.mw.paths else None
+        self._ideology_groups = _parse_ideologies(hoi4, mod)
+        from ..localisation import parse_english_localisation
+
+        loc: dict[str, str] = {}
+        if hoi4:
+            loc.update(parse_english_localisation(hoi4 / "localisation" / "english"))
+        if mod:
+            loc.update(parse_english_localisation(mod / "localisation" / "english"))
+        self._ideology_loc = loc
+        self._update_sub_ideologies(self.ruling_party.currentText())
 
     def load_selected(self):
         if not self.mw.paths:
@@ -329,26 +447,43 @@ class CountryTab(QWidget):
             self.ruling_party.setCurrentIndex(idx)
         else:
             self.ruling_party.setCurrentIndex(0)
+
+        char_ideology = read_character_ideology(self.mw.paths.mod_root, tag)
+        if char_ideology:
+            self._update_sub_ideologies(self.ruling_party.currentText())
+            sub_idx = self.leader_ideology.findText(char_ideology)
+            if sub_idx >= 0:
+                self.leader_ideology.setCurrentIndex(sub_idx)
         loc = read_country_localisation(self.mw.paths.mod_root, tag)
         if loc.get("name"):
             self.name.setText(loc["name"])
         if loc.get("adj"):
             self.adj.setText(loc["adj"])
-        if h.get("leader_name"):
-            self.leader.setText(h["leader_name"])
 
-        flag_path = self.mw.paths.mod_root / "gfx" / "flags" / f"{tag.lower()}.tga"
+        leader_name = read_character_leader_name(self.mw.paths.mod_root, tag)
+        if leader_name:
+            self.leader.setText(leader_name)
+
+        flag_path = self.mw.paths.mod_root / "gfx" / "flags" / f"{tag}.tga"
         if flag_path.exists():
             self.flag.setText(str(flag_path))
+        else:
+            self.flag.setText("")
 
-        portrait_gfx_path = self.mw.paths.mod_root / "gfx" / "leaders" / tag.lower()
+        portrait_gfx_path = self.mw.paths.mod_root / "gfx" / "leaders" / tag
+        portrait_found = False
         if portrait_gfx_path.exists():
             for img_file in portrait_gfx_path.glob("*.dds"):
                 self.portrait.setText(str(img_file))
+                portrait_found = True
                 break
-            for img_file in portrait_gfx_path.glob("*.tga"):
-                self.portrait.setText(str(img_file))
-                break
+            if not portrait_found:
+                for img_file in portrait_gfx_path.glob("*.tga"):
+                    self.portrait.setText(str(img_file))
+                    portrait_found = True
+                    break
+        if not portrait_found:
+            self.portrait.setText("")
 
     def generate(self):
         if not self.mw.paths:
@@ -414,6 +549,7 @@ class CountryTab(QWidget):
                 f"{tag}_leader_1",
                 self.leader.text().strip(),
                 portrait_slug,
+                ideology=self.leader_ideology.currentText(),
             )
 
             self.mw.log_panel.log(f"Country {tag} generated successfully.", "success")

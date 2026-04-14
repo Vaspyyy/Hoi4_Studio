@@ -343,7 +343,7 @@ class FocusTab(QWidget):
 
     def reload_tags(self):
         if self.mw.paths:
-            self.tag_picker.reload_tags(self.mw.paths.mod_root)
+            self.tag_picker.reload_tags(self.mw.paths.mod_root, self.mw.paths.hoi4_install)
 
     def filter_effects(self, q):
         q = q.lower().strip()

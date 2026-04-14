@@ -23,7 +23,13 @@ from PySide6.QtWidgets import (
 )
 
 from ..theme import AnimatedButton, create_card_widget, create_section_title
-from ..tags import load_vanilla_tags, load_mod_tags, add_country_tag
+from ..tags import (
+    load_vanilla_tags,
+    load_mod_tags,
+    load_all_tags,
+    add_country_tag,
+    resolve_country_filename,
+)
 from ..countries import (
     create_mod_structure,
     write_country_definition,
@@ -99,97 +105,124 @@ def _resolve_sub_ideology_tooltip(sub_name: str, loc: dict[str, str]) -> str:
     return display
 
 
-def read_country_definition(mod_root: Path, tag: str) -> dict:
-    p = mod_root / f"common/countries/{tag}.txt"
-    if not p.exists():
-        return {}
-    txt = p.read_text(encoding="utf-8", errors="ignore")
-    m = COLOR_RE.search(txt)
-    if m:
-        return {"color": (int(m.group(1)), int(m.group(2)), int(m.group(3)))}
-    return {}
-
-
-def read_country_history(mod_root: Path, tag: str) -> dict:
-    d = mod_root / "history/countries"
-    if not d.exists():
-        return {}
-    f = None
-    for cand in d.glob(f"{tag} - *.txt"):
-        f = cand
-        break
-    if not f:
-        return {}
-    txt = f.read_text(encoding="utf-8", errors="ignore")
-    cap = CAPITAL_RE.search(txt)
-
-    leader_name = None
-    lines = txt.splitlines()
-    for idx, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("create_country_leader") or "create_country_leader" in stripped:
-            for j in range(idx + 1, min(idx + 12, len(lines))):
-                next_line = lines[j]
-                if "name" in next_line and "=" in next_line:
-                    name_match = re.search(r'name\s*=\s*"([^"]*)"', next_line)
-                    if name_match:
-                        leader_name = name_match.group(1)
-                        break
-                if j - idx > 10:
-                    break
-
-    pops = {k: 0 for k in ["democratic", "fascism", "communism", "neutrality"]}
-    for m in POP_RE.finditer(txt):
-        pops[m.group(1)] = int(m.group(2))
-    rp = RULING_PARTY_RE.search(txt)
-    return {
-        "capital": int(cap.group(1)) if cap else 1,
-        "popularities": pops,
-        "leader_name": leader_name,
-        "ruling_party": rp.group(1) if rp else "democratic",
-    }
-
-
-def read_country_localisation(mod_root: Path, tag: str) -> dict:
-    loc_dir = mod_root / "localisation/english"
-    if not loc_dir.exists():
-        return {}
-    for f in loc_dir.rglob("*.yml"):
-        raw = f.read_bytes()
-        try:
-            txt = raw.decode("utf-8-sig")
-        except Exception:
-            txt = raw.decode("utf-8", errors="ignore")
-        if f"{tag}:" not in txt:
+def read_country_definition(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> dict:
+    for base in [mod_root, hoi4_install]:
+        if base is None:
             continue
-        name = adj = None
-        for line in txt.splitlines():
-            s = line.strip()
-            if s.startswith(f"{tag}:"):
-                name = s.split(" ", 1)[-1].strip().strip('"')
-            if s.startswith(f"{tag}_ADJ:"):
-                adj = s.split(" ", 1)[-1].strip().strip('"')
-        if name or adj:
-            return {"name": name, "adj": adj}
+        p = resolve_country_filename(base, tag)
+        if p and p.exists():
+            txt = p.read_text(encoding="utf-8", errors="ignore")
+            m = COLOR_RE.search(txt)
+            if m:
+                return {"color": (int(m.group(1)), int(m.group(2)), int(m.group(3)))}
     return {}
 
 
-def read_character_ideology(mod_root: Path, tag: str) -> str:
-    p = mod_root / f"common/characters/{tag}_characters.txt"
-    if not p.exists():
-        return ""
-    txt = p.read_text(encoding="utf-8", errors="ignore")
-    m = IDEOLOGY_RE.search(txt)
-    return m.group(1) if m else ""
+def read_country_history(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> dict:
+    for base in [mod_root, hoi4_install]:
+        if base is None:
+            continue
+        d = base / "history/countries"
+        if not d.exists():
+            continue
+        f = None
+        for cand in d.glob(f"{tag} - *.txt"):
+            f = cand
+            break
+        if not f:
+            for cand in d.glob(f"{tag}*.txt"):
+                f = cand
+                break
+        if not f:
+            continue
+        txt = f.read_text(encoding="utf-8", errors="ignore")
+        cap = CAPITAL_RE.search(txt)
+
+        leader_name = None
+        lines = txt.splitlines()
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("create_country_leader") or "create_country_leader" in stripped:
+                for j in range(idx + 1, min(idx + 12, len(lines))):
+                    next_line = lines[j]
+                    if "name" in next_line and "=" in next_line:
+                        name_match = re.search(r'name\s*=\s*"([^"]*)"', next_line)
+                        if name_match:
+                            leader_name = name_match.group(1)
+                            break
+                    if j - idx > 10:
+                        break
+
+        pops = {k: 0 for k in ["democratic", "fascism", "communism", "neutrality"]}
+        for m in POP_RE.finditer(txt):
+            pops[m.group(1)] = int(m.group(2))
+        rp = RULING_PARTY_RE.search(txt)
+        return {
+            "capital": int(cap.group(1)) if cap else 1,
+            "popularities": pops,
+            "leader_name": leader_name,
+            "ruling_party": rp.group(1) if rp else "democratic",
+        }
+    return {}
 
 
-def read_character_leader_name(mod_root: Path, tag: str) -> str:
-    p = mod_root / f"common/characters/{tag}_characters.txt"
-    if not p.exists():
-        return ""
-    txt = p.read_text(encoding="utf-8", errors="ignore")
-    m = re.search(r'name\s*=\s*"([^"]*)"', txt)
-    return m.group(1) if m else ""
+def read_country_localisation(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
+) -> dict:
+    for base in [mod_root, hoi4_install]:
+        if base is None:
+            continue
+        loc_dir = base / "localisation/english"
+        if not loc_dir.exists():
+            continue
+        for f in loc_dir.rglob("*.yml"):
+            raw = f.read_bytes()
+            try:
+                txt = raw.decode("utf-8-sig")
+            except Exception:
+                txt = raw.decode("utf-8", errors="ignore")
+            if f"{tag}:" not in txt:
+                continue
+            name = adj = None
+            for line in txt.splitlines():
+                s = line.strip()
+                if s.startswith(f"{tag}:"):
+                    name = s.split(" ", 1)[-1].strip().strip('"')
+                if s.startswith(f"{tag}_ADJ:"):
+                    adj = s.split(" ", 1)[-1].strip().strip('"')
+            if name or adj:
+                return {"name": name, "adj": adj}
+    return {}
+
+
+def read_character_ideology(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> str:
+    for base in [mod_root, hoi4_install]:
+        if base is None:
+            continue
+        p = base / f"common/characters/{tag}_characters.txt"
+        if not p.exists():
+            continue
+        txt = p.read_text(encoding="utf-8", errors="ignore")
+        m = IDEOLOGY_RE.search(txt)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def read_character_leader_name(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
+) -> str:
+    for base in [mod_root, hoi4_install]:
+        if base is None:
+            continue
+        p = base / f"common/characters/{tag}_characters.txt"
+        if not p.exists():
+            continue
+        txt = p.read_text(encoding="utf-8", errors="ignore")
+        m = re.search(r'name\s*=\s*"([^"]*)"', txt)
+        if m:
+            return m.group(1)
+    return ""
 
 
 class CountryTab(QWidget):
@@ -405,10 +438,10 @@ class CountryTab(QWidget):
         self.tag_picker.addItem("(none)")
         if not self.mw.paths:
             return
-        for t in load_mod_tags(self.mw.paths.mod_root):
-            self.tag_picker.addItem(t)
         hoi4 = self.mw.paths.hoi4_install if self.mw.paths else None
         mod = self.mw.paths.mod_root if self.mw.paths else None
+        for t in load_all_tags(hoi4, mod):
+            self.tag_picker.addItem(t)
         self._ideology_groups = _parse_ideologies(hoi4, mod)
         from ..localisation import parse_english_localisation
 
@@ -427,12 +460,14 @@ class CountryTab(QWidget):
         if not tag or tag == "(none)":
             return
         self.tag.setText(tag)
-        d = read_country_definition(self.mw.paths.mod_root, tag)
+        hoi4 = self.mw.paths.hoi4_install
+        mod = self.mw.paths.mod_root
+        d = read_country_definition(mod, tag, hoi4)
         if "color" in d:
             r, g, b = d["color"]
             self.color_preview.setText(f"{r},{g},{b}")
             self.color_swatch.set_color(r, g, b)
-        h = read_country_history(self.mw.paths.mod_root, tag)
+        h = read_country_history(mod, tag, hoi4)
         if "capital" in h:
             self.capital.setValue(int(h["capital"]))
         pops = h.get("popularities", {})
@@ -448,40 +483,53 @@ class CountryTab(QWidget):
         else:
             self.ruling_party.setCurrentIndex(0)
 
-        char_ideology = read_character_ideology(self.mw.paths.mod_root, tag)
+        char_ideology = read_character_ideology(mod, tag, hoi4)
         if char_ideology:
             self._update_sub_ideologies(self.ruling_party.currentText())
             sub_idx = self.leader_ideology.findText(char_ideology)
             if sub_idx >= 0:
                 self.leader_ideology.setCurrentIndex(sub_idx)
-        loc = read_country_localisation(self.mw.paths.mod_root, tag)
+        loc = read_country_localisation(mod, tag, hoi4)
         if loc.get("name"):
             self.name.setText(loc["name"])
         if loc.get("adj"):
             self.adj.setText(loc["adj"])
 
-        leader_name = read_character_leader_name(self.mw.paths.mod_root, tag)
+        leader_name = read_character_leader_name(mod, tag, hoi4)
         if leader_name:
             self.leader.setText(leader_name)
 
-        flag_path = self.mw.paths.mod_root / "gfx" / "flags" / f"{tag}.tga"
-        if flag_path.exists():
-            self.flag.setText(str(flag_path))
-        else:
-            self.flag.setText("")
-
-        portrait_gfx_path = self.mw.paths.mod_root / "gfx" / "leaders" / tag
-        portrait_found = False
-        if portrait_gfx_path.exists():
-            for img_file in portrait_gfx_path.glob("*.dds"):
-                self.portrait.setText(str(img_file))
-                portrait_found = True
+        flag_path = None
+        rp = h.get("ruling_party", "neutrality")
+        for base in [mod, hoi4]:
+            if base is None:
+                continue
+            for suffix in ["", f"_{rp}", "_neutrality", "_democratic"]:
+                p = base / "gfx" / "flags" / f"{tag}{suffix}.tga"
+                if p.exists():
+                    flag_path = p
+                    break
+            if flag_path:
                 break
-            if not portrait_found:
-                for img_file in portrait_gfx_path.glob("*.tga"):
+        self.flag.setText(str(flag_path) if flag_path else "")
+
+        portrait_found = False
+        for base in [mod, hoi4]:
+            if base is None:
+                continue
+            portrait_gfx_path = base / "gfx" / "leaders" / tag
+            if portrait_gfx_path.exists():
+                for img_file in portrait_gfx_path.glob("*.dds"):
                     self.portrait.setText(str(img_file))
                     portrait_found = True
                     break
+                if not portrait_found:
+                    for img_file in portrait_gfx_path.glob("*.tga"):
+                        self.portrait.setText(str(img_file))
+                        portrait_found = True
+                        break
+            if portrait_found:
+                break
         if not portrait_found:
             self.portrait.setText("")
 

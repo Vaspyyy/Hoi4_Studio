@@ -54,6 +54,7 @@ class TagPickerWidget(QWidget):
         layout.addWidget(btn_reload)
 
         self._mod_root = None
+        self._hoi4_install = None
         self.combo.currentTextChanged.connect(
             lambda t: self.tag_selected.emit(t) if t and t != "(none)" else None
         )
@@ -65,16 +66,18 @@ class TagPickerWidget(QWidget):
     def _request_reload(self) -> None:
         self.reload_tags()
 
-    def reload_tags(self, mod_root=None) -> None:
+    def reload_tags(self, mod_root=None, hoi4_install=None) -> None:
         if mod_root:
             self._mod_root = mod_root
-        if not self._mod_root:
+        if hoi4_install:
+            self._hoi4_install = hoi4_install
+        if not self._mod_root and not self._hoi4_install:
             return
-        from .tags import load_mod_tags
+        from .tags import load_all_tags
 
         self.combo.clear()
         self.combo.addItem("(none)")
-        for t in load_mod_tags(self._mod_root):
+        for t in load_all_tags(self._hoi4_install, self._mod_root):
             self.combo.addItem(t)
 
     def current_tag(self) -> str:

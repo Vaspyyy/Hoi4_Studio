@@ -107,7 +107,7 @@ class StateBrowserTab(QWidget):
 
     def reload_tags(self):
         if self.mw.paths:
-            self.tag_picker.reload_tags(self.mw.paths.mod_root)
+            self.tag_picker.reload_tags(self.mw.paths.mod_root, self.mw.paths.hoi4_install)
 
     def reload_index(self):
         if not self.mw.paths:

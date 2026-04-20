@@ -328,10 +328,14 @@ def _render_political_map(
     country_colors: dict[str, tuple[int, int, int]],
     progress_cb=None,
     ocean_texture: Optional[np.ndarray] = None,
+    provinces_arr: Optional[np.ndarray] = None,
 ) -> tuple[np.ndarray, int, int]:
-    img = Image.open(provinces_bmp_path)
-    img = img.convert("RGB")
-    arr = np.array(img, dtype=np.uint8)
+    if provinces_arr is not None:
+        arr = provinces_arr
+    else:
+        img = Image.open(provinces_bmp_path)
+        img = img.convert("RGB")
+        arr = np.array(img, dtype=np.uint8)
     h, w, _ = arr.shape
 
     all_tags = set(state_owner.values())
@@ -477,6 +481,7 @@ class MapRenderWorker(QThread):
                 self.country_colors,
                 progress_cb=_progress,
                 ocean_texture=ocean_texture,
+                provinces_arr=self.provinces_arr,
             )
 
             if cache and cache.border_mask is not None and cache.provinces_arr is not None:
@@ -549,6 +554,137 @@ class MapRenderWorker(QThread):
         bordered[border, 2] = 20
 
         return bordered, border
+
+
+def _compute_country_regions_fast(
+    state_img: np.ndarray,
+    state_owner: dict[int, str],
+    downsample: int = 4,
+) -> list[tuple[str, list[tuple[float, float]], float]]:
+    from scipy.ndimage import label as ndimage_label
+
+    if downsample > 1:
+        si = state_img[::downsample, ::downsample]
+    else:
+        si = state_img
+
+    H, W = si.shape[:2]
+    area_scale = downsample * downsample
+
+    all_tags = sorted(set(state_owner.values()))
+    if not all_tags:
+        return []
+
+    tag_to_idx: dict[str, int] = {tag: i + 1 for i, tag in enumerate(all_tags)}
+
+    unique_sids = np.unique(si)
+    max_sid = int(unique_sids.max()) if len(unique_sids) > 0 else 0
+
+    sid_to_owner = np.zeros(max_sid + 2, dtype=np.int16)
+    for sid_val in unique_sids:
+        sv = int(sid_val)
+        if sv >= 0:
+            tag = state_owner.get(sv)
+            if tag:
+                sid_to_owner[sv] = tag_to_idx.get(tag, 0)
+
+    owner_img = sid_to_owner[np.clip(si, 0, max_sid + 1)]
+
+    min_area = max(1, 400 // area_scale)
+    min_cw = max(1, 15 // downsample)
+    min_ch = max(1, 8 // downsample)
+
+    out: list[tuple[str, list[tuple[float, float]], float]] = []
+
+    for idx in range(1, len(all_tags) + 1):
+        mask = owner_img == idx
+        if not mask.any():
+            continue
+
+        labeled, n_components = ndimage_label(mask)
+        tag = all_tags[idx - 1]
+
+        for comp_id in range(1, n_components + 1):
+            comp = labeled == comp_id
+            n = int(comp.sum())
+            if n < min_area:
+                continue
+
+            ys, xs = np.where(comp)
+            xmin, xmax = int(xs.min()), int(xs.max())
+            ymin, ymax = int(ys.min()), int(ys.max())
+            cw = xmax - xmin
+            ch = ymax - ymin
+            if cw < min_cw or ch < min_ch:
+                continue
+
+            n_samp = min(15, max(4, int(max(cw, ch) / 15)))
+            pts: list[tuple[float, float]] = []
+            if cw >= ch:
+                cols = np.linspace(xmin, xmax, n_samp)
+                for c in cols:
+                    ci = int(c)
+                    if ci < 0 or ci >= W:
+                        continue
+                    col_mask = comp[:, ci]
+                    if col_mask.any():
+                        cy = float(np.where(col_mask)[0].mean())
+                        pts.append((float(ci) * downsample, cy * downsample))
+            else:
+                rows = np.linspace(ymin, ymax, n_samp)
+                for r in rows:
+                    ri = int(r)
+                    if ri < 0 or ri >= H:
+                        continue
+                    row_mask = comp[ri]
+                    if row_mask.any():
+                        cx = float(np.where(row_mask)[0].mean())
+                        pts.append((cx * downsample, float(ri) * downsample))
+
+            if len(pts) < 2:
+                continue
+
+            for _ in range(3):
+                if len(pts) <= 3:
+                    break
+                sm = [pts[0]]
+                for i in range(1, len(pts) - 1):
+                    sx = (pts[i - 1][0] + pts[i][0] + pts[i + 1][0]) / 3
+                    sy = (pts[i - 1][1] + pts[i][1] + pts[i + 1][1]) / 3
+                    sm.append((sx, sy))
+                sm.append(pts[-1])
+                pts = sm
+
+            if cw >= ch and pts[0][0] > pts[-1][0]:
+                pts.reverse()
+            elif ch > cw and pts[0][1] > pts[-1][1]:
+                pts.reverse()
+
+            axis_len = float(cw * downsample if cw >= ch else ch * downsample)
+            out.append((tag, pts, axis_len))
+
+    return out
+
+
+class LabelComputeWorker(QThread):
+    finished = Signal(list)
+
+    def __init__(
+        self,
+        state_img: np.ndarray,
+        state_owner: dict[int, str],
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._state_img = state_img
+        self._state_owner = state_owner
+
+    def run(self) -> None:
+        try:
+            regions = _compute_country_regions_fast(self._state_img, self._state_owner)
+            self.finished.emit(regions)
+        except Exception:
+            self.finished.emit([])
 
 
 class _CountryLabelItem(QGraphicsItem):
@@ -686,6 +822,8 @@ class MapGraphicsView(QGraphicsView):
         self._label_items: list[_CountryLabelItem] = []
         self._localisation: dict[str, str] = {}
         self._labels_dirty = True
+        self._label_worker: Optional[LabelComputeWorker] = None
+        self._cached_regions: Optional[list[tuple[str, list[tuple[float, float]], float]]] = None
 
     def set_view_states(self, enabled: bool) -> None:
         self._view_states = enabled
@@ -706,10 +844,14 @@ class MapGraphicsView(QGraphicsView):
     def set_localisation(self, loc: dict[str, str]) -> None:
         self._localisation = loc
         self._labels_dirty = True
+        self._cached_regions = None
         if self._show_labels:
             self._rebuild_labels()
 
     def _clear_labels(self) -> None:
+        if self._label_worker is not None:
+            self._label_worker.finished.disconnect()
+            self._label_worker = None
         for item in self._label_items:
             self._scene.removeItem(item)
         self._label_items.clear()
@@ -721,7 +863,26 @@ class MapGraphicsView(QGraphicsView):
         self._ensure_state_img()
         if self._cached_state_img is None or not self._localisation:
             return
-        regions = self._compute_country_regions()
+        if self._cached_regions is not None and not self._labels_dirty:
+            self._create_label_items(self._cached_regions)
+            return
+        self._label_worker = LabelComputeWorker(
+            self._cached_state_img, self._state_owner
+        )
+        self._label_worker.finished.connect(self._on_labels_computed)
+        self._label_worker.start()
+
+    def _on_labels_computed(
+        self, regions: list[tuple[str, list[tuple[float, float]], float]]
+    ) -> None:
+        self._label_worker = None
+        self._cached_regions = regions
+        self._labels_dirty = False
+        self._create_label_items(regions)
+
+    def _create_label_items(
+        self, regions: list[tuple[str, list[tuple[float, float]], float]]
+    ) -> None:
         for tag, spine, region_w in regions:
             name = self._localisation.get(tag, "")
             if not name:
@@ -734,7 +895,6 @@ class MapGraphicsView(QGraphicsView):
             item = _CountryLabelItem(name, spine, fs)
             self._scene.addItem(item)
             self._label_items.append(item)
-        self._labels_dirty = False
 
     def _ensure_state_img(self) -> None:
         if self._cached_state_img is not None:
@@ -763,72 +923,6 @@ class MapGraphicsView(QGraphicsView):
             else:
                 hi = mid - 1
         return best
-
-    def _compute_country_regions(self) -> list[tuple[str, list[tuple[float, float]], float]]:
-        from scipy.ndimage import label as ndimage_label
-
-        si = self._cached_state_img
-        H, W = si.shape[:2]
-        tag_to_sids: dict[str, set[int]] = {}
-        for sid, tag in self._state_owner.items():
-            tag_to_sids.setdefault(tag, set()).add(sid)
-        out: list[tuple[str, list[tuple[float, float]], float]] = []
-        for tag, sids in tag_to_sids.items():
-            mask = np.isin(si, list(sids))
-            labeled, n_components = ndimage_label(mask)
-            for comp_id in range(1, n_components + 1):
-                comp = labeled == comp_id
-                n = int(comp.sum())
-                if n < 400:
-                    continue
-                ys, xs = np.where(comp)
-                xmin, xmax = int(xs.min()), int(xs.max())
-                ymin, ymax = int(ys.min()), int(ys.max())
-                cw = xmax - xmin
-                ch = ymax - ymin
-                if cw < 15 or ch < 8:
-                    continue
-                n_samp = min(15, max(4, int(max(cw, ch) / 15)))
-                pts: list[tuple[float, float]] = []
-                if cw >= ch:
-                    cols = np.linspace(xmin, xmax, n_samp)
-                    for c in cols:
-                        ci = int(c)
-                        if ci < 0 or ci >= W:
-                            continue
-                        col_mask = comp[:, ci]
-                        if col_mask.any():
-                            cy = float(np.where(col_mask)[0].mean())
-                            pts.append((float(ci), cy))
-                else:
-                    rows = np.linspace(ymin, ymax, n_samp)
-                    for r in rows:
-                        ri = int(r)
-                        if ri < 0 or ri >= H:
-                            continue
-                        row_mask = comp[ri]
-                        if row_mask.any():
-                            cx = float(np.where(row_mask)[0].mean())
-                            pts.append((cx, float(ri)))
-                if len(pts) < 2:
-                    continue
-                for _ in range(3):
-                    if len(pts) <= 3:
-                        break
-                    sm = [pts[0]]
-                    for i in range(1, len(pts) - 1):
-                        sx = (pts[i - 1][0] + pts[i][0] + pts[i + 1][0]) / 3
-                        sy = (pts[i - 1][1] + pts[i][1] + pts[i + 1][1]) / 3
-                        sm.append((sx, sy))
-                    sm.append(pts[-1])
-                    pts = sm
-                if cw >= ch and pts[0][0] > pts[-1][0]:
-                    pts.reverse()
-                elif ch > cw and pts[0][1] > pts[-1][1]:
-                    pts.reverse()
-                axis_len = float(cw if cw >= ch else ch)
-                out.append((tag, pts, axis_len))
-        return out
 
     def _apply_rivers(self, arr: np.ndarray) -> np.ndarray:
         if self._rivers_mask is None:
@@ -913,6 +1007,8 @@ class MapGraphicsView(QGraphicsView):
         self._prov_to_state = prov_to_state
         self._state_owner = state_owner
         self._state_names = state_names
+        self._cached_regions = None
+        self._labels_dirty = True
         self._build_state_to_rgbs()
         if localisation is not None:
             self.set_localisation(localisation)

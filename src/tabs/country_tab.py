@@ -251,11 +251,12 @@ class CountryTab(QWidget):
         rowpick.addWidget(btn_load)
         layout.addLayout(rowpick)
 
-        self.disable_tag_check = QCheckBox("Disable TAG availability checking")
-        self.disable_tag_check.setToolTip(
-            "Allow using vanilla tags (3-letter codes already used by the base game)"
+        self.override_vanilla = QCheckBox("Override vanilla country")
+        self.override_vanilla.setToolTip(
+            "Write mod files that replace this vanilla country's definition.\n"
+            "Automatically checked when editing a vanilla tag."
         )
-        layout.addWidget(self.disable_tag_check)
+        layout.addWidget(self.override_vanilla)
 
         self.tag = QLineEdit("ABC")
         self.tag.setToolTip("3-letter country tag (e.g., GER, USA, ABC)")
@@ -347,12 +348,21 @@ class CountryTab(QWidget):
         layout.addWidget(btn)
 
         outer.addWidget(card)
+        self.tag_picker.currentTextChanged.connect(self._on_tag_picker_changed)
         self.reload_tags()
 
     def _on_color_changed(self, color: tuple):
         r, g, b = color
         self.color_preview.setText(f"{r},{g},{b}")
         self.color_swatch.set_color(r, g, b)
+
+    def _on_tag_picker_changed(self, text: str) -> None:
+        tag = text.strip().upper()
+        if not tag or tag == "(NONE)" or not self.mw.paths:
+            return
+        vanilla = load_vanilla_tags(self.mw.paths.hoi4_install)
+        if tag in vanilla:
+            self.override_vanilla.setChecked(True)
 
     def _update_sub_ideologies(self, ruling_party: str) -> None:
         current = self.leader_ideology.currentText()
@@ -462,6 +472,8 @@ class CountryTab(QWidget):
         self.tag.setText(tag)
         hoi4 = self.mw.paths.hoi4_install
         mod = self.mw.paths.mod_root
+        vanilla_tags = load_vanilla_tags(hoi4)
+        self.override_vanilla.setChecked(tag in vanilla_tags)
         d = read_country_definition(mod, tag, hoi4)
         if "color" in d:
             r, g, b = d["color"]
@@ -546,10 +558,20 @@ class CountryTab(QWidget):
             return
         ValidationMixin.set_valid(self.tag, True)
 
-        if not self.disable_tag_check.isChecked():
-            if tag in load_vanilla_tags(self.mw.paths.hoi4_install):
-                QMessageBox.critical(self, "Error", f"TAG {tag} is already used by vanilla HOI4")
+        is_vanilla = tag in load_vanilla_tags(self.mw.paths.hoi4_install)
+        if is_vanilla and not self.override_vanilla.isChecked():
+            result = QMessageBox.question(
+                self,
+                "Override vanilla country?",
+                f"TAG {tag} is a vanilla HoI4 country.\n\nWrite mod override files for it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                self.override_vanilla.setChecked(True)
+            else:
                 return
+
         try:
             r, g, b = [int(x.strip()) for x in self.color_preview.text().split(",")]
             pops = {
@@ -559,8 +581,14 @@ class CountryTab(QWidget):
                 "neutrality": self.s_neu.value(),
             }
             create_mod_structure(self.mw.paths)
-            add_country_tag(self.mw.paths.mod_root, tag)
+            if not is_vanilla:
+                add_country_tag(self.mw.paths.mod_root, tag)
             write_country_definition(self.mw.paths.mod_root, tag, (r, g, b))
+            from ..countries import _find_vanilla_history_name
+
+            vanilla_hist_name = (
+                _find_vanilla_history_name(self.mw.paths.hoi4_install, tag) if is_vanilla else None
+            )
             write_country_history(
                 self.mw.paths.mod_root,
                 tag,
@@ -569,6 +597,7 @@ class CountryTab(QWidget):
                 pops,
                 self.leader.text().strip(),
                 ruling_party=self.ruling_party.currentText(),
+                vanilla_history_name=vanilla_hist_name,
             )
             write_localisation_country(
                 self.mw.paths.mod_root,
@@ -577,7 +606,12 @@ class CountryTab(QWidget):
                 self.adj.text().strip(),
             )
             if self.flag.text().strip():
-                import_flag_to_mod(self.mw.paths.mod_root, tag, Path(self.flag.text().strip()))
+                import_flag_to_mod(
+                    self.mw.paths.mod_root,
+                    tag,
+                    Path(self.flag.text().strip()),
+                    vanilla_override=is_vanilla,
+                )
             portrait_slug = "leader_1"
 
             if self.portrait.text().strip():
@@ -598,6 +632,7 @@ class CountryTab(QWidget):
                 self.leader.text().strip(),
                 portrait_slug,
                 ideology=self.leader_ideology.currentText(),
+                vanilla_override=is_vanilla,
             )
 
             self.mw.log_panel.log(f"Country {tag} generated successfully.", "success")

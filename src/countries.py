@@ -49,6 +49,18 @@ def write_country_definition(mod_root: Path, tag: str, color: Tuple[int, int, in
     )
 
 
+def _find_vanilla_history_name(hoi4_install: Path, tag: str) -> str | None:
+    d = hoi4_install / "history/countries"
+    if not d.is_dir():
+        return None
+    for f in d.glob(f"{tag} - *.txt"):
+        stem = f.stem
+        name_part = stem.split(" - ", 1)
+        if len(name_part) == 2:
+            return name_part[1]
+    return None
+
+
 def write_country_history(
     mod_root: Path,
     tag: str,
@@ -58,13 +70,20 @@ def write_country_history(
     leader_name: str,
     leader_id: str | None = None,
     ruling_party: str = "democratic",
+    vanilla_history_name: str | None = None,
 ) -> None:
     if leader_id is None:
         leader_id = f"{tag}_leader_1"
 
-    safe_name = re.sub(r'[\\/:*?"<>|]', "_", name)
+    if vanilla_history_name:
+        safe_name = vanilla_history_name
+    else:
+        safe_name = re.sub(r'[\\/:*?"<>|]', "_", name)
     p = mod_root / f"history/countries/{tag} - {safe_name}.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
+    for old in p.parent.glob(f"{tag} - *.txt"):
+        if old != p:
+            old.unlink()
 
     elections_allowed = "yes" if ruling_party == "democratic" else "no"
 
@@ -95,10 +114,12 @@ set_country_leader = {{
 def write_localisation_country(mod_root: Path, tag: str, name: str, adj: str) -> None:
     loc = mod_root / f"localisation/english/{tag}_country_l_english.yml"
     loc.parent.mkdir(parents=True, exist_ok=True)
-    loc.write_text(
-        f'\ufeffl_english:\n {tag}:0 "{name}"\n {tag}_DEF:0 "{name}"\n {tag}_ADJ:0 "{adj}"\n',
-        encoding="utf-8",
-    )
+    lines = [f"\ufeffl_english:\n"]
+    for suffix in ["", "_neutrality", "_democratic", "_fascism", "_communism"]:
+        lines.append(f' {tag}{suffix}:0 "{name}"\n')
+        lines.append(f' {tag}{suffix}_DEF:0 "{name}"\n')
+    lines.append(f' {tag}_ADJ:0 "{adj}"\n')
+    loc.write_text("".join(lines), encoding="utf-8")
 
 
 def write_portrait_gfx(mod_root: Path, tag: str, portrait_slug: str) -> None:
@@ -132,8 +153,10 @@ def write_character_file(
     leader_name: str,
     portrait_slug: str,
     ideology: str = "liberalism",
+    vanilla_override: bool = False,
 ) -> None:
-    p = mod_root / f"common/characters/{tag}_characters.txt"
+    fname = f"{tag}.txt" if vanilla_override else f"{tag}_characters.txt"
+    p = mod_root / f"common/characters/{fname}"
     p.parent.mkdir(parents=True, exist_ok=True)
 
     txt = f"""characters = {{

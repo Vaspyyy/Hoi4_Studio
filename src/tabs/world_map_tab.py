@@ -15,13 +15,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+import math
+
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QTimer, QThread, Qt, Signal
-from PySide6.QtGui import QImage, QMouseEvent, QWheelEvent, QPainter
+from PySide6.QtCore import QPointF, QRectF, QTimer, QThread, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QImage,
+    QMouseEvent,
+    QPainter,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
+    QGraphicsItem,
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
@@ -406,6 +417,7 @@ class MapRenderWorker(QThread):
         self.prov_to_state: dict = {}
         self.state_owner: dict = {}
         self.state_names: dict = {}
+        self.localisation: dict[str, str] = {}
         self.clean_arr: Optional[np.ndarray] = None
         self.bordered_arr: Optional[np.ndarray] = None
         self.rivers_mask: Optional[np.ndarray] = None
@@ -431,6 +443,7 @@ class MapRenderWorker(QThread):
                 state_names = {}
                 for sid, key in state_names_raw.items():
                     state_names[sid] = loc.get(key, key)
+                self.localisation = loc
 
             if cache and cache.provinces_arr is not None:
                 self.provinces_arr = cache.provinces_arr
@@ -538,6 +551,90 @@ class MapRenderWorker(QThread):
         return bordered, border
 
 
+class _CountryLabelItem(QGraphicsItem):
+    def __init__(self, name: str, spine: list[tuple[float, float]], font_size: float):
+        super().__init__()
+        self._name = name
+        self._spine = spine
+        self._font_size = max(3, min(48, int(font_size)))
+        self._font = QFont("Sans Serif", self._font_size, QFont.Weight.Bold)
+        self._layout: list[tuple[str, float, float, float]] = []
+        self._brect = QRectF()
+        self._precompute()
+
+    def _precompute(self) -> None:
+        if not self._spine or not self._name:
+            return
+        fm = QFontMetrics(self._font)
+        total_w = sum(fm.horizontalAdvance(c) for c in self._name)
+        lengths = [0.0]
+        for i in range(1, len(self._spine)):
+            dx = self._spine[i][0] - self._spine[i - 1][0]
+            dy = self._spine[i][1] - self._spine[i - 1][1]
+            lengths.append(lengths[-1] + math.hypot(dx, dy))
+        total_len = lengths[-1] if lengths else 0.0
+        offset = (total_len - total_w) / 2
+        cur = offset
+        mn_x = mn_y = float("inf")
+        mx_x = mx_y = float("-inf")
+        for ch in self._name:
+            cw = fm.horizontalAdvance(ch)
+            pos = cur + cw / 2
+            x, y, ang = self._interp(pos, lengths)
+            self._layout.append((ch, x, y, ang))
+            hh = fm.height() / 2
+            hw = cw / 2
+            ca = abs(math.cos(ang))
+            sa = abs(math.sin(ang))
+            ex = hw * ca + hh * sa
+            ey = hw * sa + hh * ca
+            mn_x = min(mn_x, x - ex)
+            mn_y = min(mn_y, y - ey)
+            mx_x = max(mx_x, x + ex)
+            mx_y = max(mx_y, y + ey)
+            cur += cw
+        self._brect = QRectF(mn_x, mn_y, mx_x - mn_x, mx_y - mn_y)
+
+    def _interp(self, dist: float, lengths: list[float]) -> tuple[float, float, float]:
+        if dist <= 0:
+            ang = self._spine_angle(0)
+            return self._spine[0][0], self._spine[0][1], ang
+        for i in range(1, len(lengths)):
+            if dist <= lengths[i]:
+                seg = lengths[i] - lengths[i - 1]
+                t = (dist - lengths[i - 1]) / seg if seg > 0 else 0.0
+                x = self._spine[i - 1][0] + t * (self._spine[i][0] - self._spine[i - 1][0])
+                y = self._spine[i - 1][1] + t * (self._spine[i][1] - self._spine[i - 1][1])
+                return x, y, self._spine_angle(i - 1)
+        ang = self._spine_angle(len(self._spine) - 2)
+        return self._spine[-1][0], self._spine[-1][1], ang
+
+    def _spine_angle(self, idx: int) -> float:
+        i = max(0, min(idx, len(self._spine) - 2))
+        dx = self._spine[i + 1][0] - self._spine[i][0]
+        dy = self._spine[i + 1][1] - self._spine[i][1]
+        return math.atan2(dy, dx)
+
+    def boundingRect(self) -> QRectF:
+        return self._brect
+
+    def paint(self, painter: QPainter, option, widget) -> None:
+        painter.setFont(self._font)
+        fm = painter.fontMetrics()
+        for ch, x, y, ang in self._layout:
+            painter.save()
+            painter.translate(x, y)
+            painter.rotate(math.degrees(ang))
+            dx = -fm.horizontalAdvance(ch) / 2
+            dy = fm.ascent() / 3
+            painter.setPen(QPen(QColor(0, 0, 0, 200), 2))
+            for ox, oy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]:
+                painter.drawText(QPointF(dx + ox, dy + oy), ch)
+            painter.setPen(QPen(QColor(255, 255, 255, 230)))
+            painter.drawText(QPointF(dx, dy), ch)
+            painter.restore()
+
+
 class MapGraphicsView(QGraphicsView):
     open_state_properties = Signal(int)
     toggle_mass_transfer_state = Signal(int)
@@ -585,6 +682,11 @@ class MapGraphicsView(QGraphicsView):
         self._state_lut: Optional[np.ndarray] = None
         self._cached_state_img: Optional[np.ndarray] = None
 
+        self._show_labels = False
+        self._label_items: list[_CountryLabelItem] = []
+        self._localisation: dict[str, str] = {}
+        self._labels_dirty = True
+
     def set_view_states(self, enabled: bool) -> None:
         self._view_states = enabled
         self._refresh_display()
@@ -593,6 +695,140 @@ class MapGraphicsView(QGraphicsView):
         self._show_rivers = enabled
         self._rebuild_rivers_cache()
         self._refresh_display()
+
+    def set_labels_enabled(self, enabled: bool) -> None:
+        self._show_labels = enabled
+        if enabled:
+            self._rebuild_labels()
+        else:
+            self._clear_labels()
+
+    def set_localisation(self, loc: dict[str, str]) -> None:
+        self._localisation = loc
+        self._labels_dirty = True
+        if self._show_labels:
+            self._rebuild_labels()
+
+    def _clear_labels(self) -> None:
+        for item in self._label_items:
+            self._scene.removeItem(item)
+        self._label_items.clear()
+
+    def _rebuild_labels(self) -> None:
+        self._clear_labels()
+        if not self._show_labels:
+            return
+        self._ensure_state_img()
+        if self._cached_state_img is None or not self._localisation:
+            return
+        regions = self._compute_country_regions()
+        for tag, spine, region_w in regions:
+            name = self._localisation.get(tag, "")
+            if not name:
+                name = tag
+            if len(spine) < 2:
+                continue
+            fs = self._fit_font_size(name, region_w)
+            if fs < 3:
+                continue
+            item = _CountryLabelItem(name, spine, fs)
+            self._scene.addItem(item)
+            self._label_items.append(item)
+        self._labels_dirty = False
+
+    def _ensure_state_img(self) -> None:
+        if self._cached_state_img is not None:
+            return
+        if self._state_lut is None or self._provinces_arr is None:
+            return
+        self._cached_state_img = self._state_lut[
+            self._provinces_arr[:, :, 0],
+            self._provinces_arr[:, :, 1],
+            self._provinces_arr[:, :, 2],
+        ]
+
+    @staticmethod
+    def _fit_font_size(text: str, max_pixel_width: float) -> float:
+        target = max_pixel_width * 0.7
+        lo, hi = 3, 64
+        best = 3
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            f = QFont("Sans Serif", mid, QFont.Weight.Bold)
+            fm = QFontMetrics(f)
+            w = fm.horizontalAdvance(text)
+            if w <= target:
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return best
+
+    def _compute_country_regions(self) -> list[tuple[str, list[tuple[float, float]], float]]:
+        from scipy.ndimage import label as ndimage_label
+
+        si = self._cached_state_img
+        H, W = si.shape[:2]
+        tag_to_sids: dict[str, set[int]] = {}
+        for sid, tag in self._state_owner.items():
+            tag_to_sids.setdefault(tag, set()).add(sid)
+        out: list[tuple[str, list[tuple[float, float]], float]] = []
+        for tag, sids in tag_to_sids.items():
+            mask = np.isin(si, list(sids))
+            labeled, n_components = ndimage_label(mask)
+            for comp_id in range(1, n_components + 1):
+                comp = labeled == comp_id
+                n = int(comp.sum())
+                if n < 400:
+                    continue
+                ys, xs = np.where(comp)
+                xmin, xmax = int(xs.min()), int(xs.max())
+                ymin, ymax = int(ys.min()), int(ys.max())
+                cw = xmax - xmin
+                ch = ymax - ymin
+                if cw < 15 or ch < 8:
+                    continue
+                n_samp = min(15, max(4, int(max(cw, ch) / 15)))
+                pts: list[tuple[float, float]] = []
+                if cw >= ch:
+                    cols = np.linspace(xmin, xmax, n_samp)
+                    for c in cols:
+                        ci = int(c)
+                        if ci < 0 or ci >= W:
+                            continue
+                        col_mask = comp[:, ci]
+                        if col_mask.any():
+                            cy = float(np.where(col_mask)[0].mean())
+                            pts.append((float(ci), cy))
+                else:
+                    rows = np.linspace(ymin, ymax, n_samp)
+                    for r in rows:
+                        ri = int(r)
+                        if ri < 0 or ri >= H:
+                            continue
+                        row_mask = comp[ri]
+                        if row_mask.any():
+                            cx = float(np.where(row_mask)[0].mean())
+                            pts.append((cx, float(ri)))
+                if len(pts) < 2:
+                    continue
+                for _ in range(3):
+                    if len(pts) <= 3:
+                        break
+                    sm = [pts[0]]
+                    for i in range(1, len(pts) - 1):
+                        sx = (pts[i - 1][0] + pts[i][0] + pts[i + 1][0]) / 3
+                        sy = (pts[i - 1][1] + pts[i][1] + pts[i + 1][1]) / 3
+                        sm.append((sx, sy))
+                    sm.append(pts[-1])
+                    pts = sm
+                if cw >= ch and pts[0][0] > pts[-1][0]:
+                    pts.reverse()
+                elif ch > cw and pts[0][1] > pts[-1][1]:
+                    pts.reverse()
+                axis_len = float(cw if cw >= ch else ch)
+                out.append((tag, pts, axis_len))
+        return out
 
     def _apply_rivers(self, arr: np.ndarray) -> np.ndarray:
         if self._rivers_mask is None:
@@ -670,6 +906,7 @@ class MapGraphicsView(QGraphicsView):
         prov_to_state: dict[int, int],
         state_owner: dict[int, str],
         state_names: dict[int, str],
+        localisation: dict[str, str] | None = None,
     ) -> None:
         self._provinces_arr = provinces_arr
         self._rgb_to_prov = rgb_to_prov
@@ -677,6 +914,8 @@ class MapGraphicsView(QGraphicsView):
         self._state_owner = state_owner
         self._state_names = state_names
         self._build_state_to_rgbs()
+        if localisation is not None:
+            self.set_localisation(localisation)
 
     def _build_state_to_rgbs(self) -> None:
         self._state_to_rgbs.clear()
@@ -971,6 +1210,10 @@ class WorldMapTab(QWidget):
         self.cb_rivers.setToolTip("Overlay rivers from map/rivers.bmp")
         self.cb_rivers.toggled.connect(self._toggle_rivers)
         top.addWidget(self.cb_rivers)
+        self.cb_labels = QCheckBox("Show Labels")
+        self.cb_labels.setToolTip("Display country names on the map")
+        self.cb_labels.toggled.connect(self.map_view.set_labels_enabled)
+        top.addWidget(self.cb_labels)
         self.btn_done_transfer = AnimatedButton("Done")
         self.btn_done_transfer.setToolTip("Finish mass transfer and send IDs to States tab")
         self.btn_done_transfer.clicked.connect(self._on_mass_transfer_done)
@@ -1245,6 +1488,7 @@ class WorldMapTab(QWidget):
                 self._worker.prov_to_state,
                 self._worker.state_owner,
                 self._worker.state_names,
+                self._worker.localisation,
             )
             if self._worker.clean_arr is not None:
                 self.map_view.set_render_arrays(

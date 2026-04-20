@@ -24,17 +24,25 @@ def nuclear_delete_mod(
             desc.unlink()
 
 
-def import_flag_to_mod(mod_root: Path, tag: str, src_image: Path) -> None:
+def import_flag_to_mod(
+    mod_root: Path, tag: str, src_image: Path, vanilla_override: bool = False
+) -> None:
     with Image.open(src_image) as img:
         rgba = img.convert("RGBA")
-        sizes = {
-            mod_root / f"gfx/flags/{tag}.tga": (82, 52),
-            mod_root / f"gfx/flags/medium/{tag}.tga": (41, 26),
-            mod_root / f"gfx/flags/small/{tag}.tga": (10, 7),
-        }
-        for out, size in sizes.items():
-            out.parent.mkdir(parents=True, exist_ok=True)
-            rgba.resize(size, Image.LANCZOS).save(out, format="TGA")
+        suffixes = (
+            [""]
+            if not vanilla_override
+            else ["", "_neutrality", "_democratic", "_fascism", "_communism"]
+        )
+        for suffix in suffixes:
+            sizes = {
+                mod_root / f"gfx/flags/{tag}{suffix}.tga": (82, 52),
+                mod_root / f"gfx/flags/medium/{tag}{suffix}.tga": (41, 26),
+                mod_root / f"gfx/flags/small/{tag}{suffix}.tga": (10, 7),
+            }
+            for out, size in sizes.items():
+                out.parent.mkdir(parents=True, exist_ok=True)
+                rgba.resize(size, Image.LANCZOS).save(out, format="TGA")
 
 
 def _have_magick() -> bool:

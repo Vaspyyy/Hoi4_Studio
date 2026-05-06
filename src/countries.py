@@ -71,6 +71,7 @@ def write_country_history(
     leader_id: str | None = None,
     ruling_party: str = "democratic",
     vanilla_history_name: str | None = None,
+    ideas: list[str] | None = None,
 ) -> None:
     if leader_id is None:
         leader_id = f"{tag}_leader_1"
@@ -86,6 +87,11 @@ def write_country_history(
             old.unlink()
 
     elections_allowed = "yes" if ruling_party == "democratic" else "no"
+
+    ideas_block = ""
+    if ideas:
+        ideas_lines = "\n".join(f" {idea}" for idea in ideas)
+        ideas_block = f"\nadd_ideas = {{\n{ideas_lines}\n}}\n"
 
     txt = f"""capital = {capital_state_id}
 
@@ -105,9 +111,9 @@ set_politics = {{
 }}
 
 set_country_leader = {{
- character = {leader_id}
-}}
-"""
+  character = {leader_id}
+ }}
+{ideas_block}"""
     p.write_text(txt, encoding="utf-8")
 
 

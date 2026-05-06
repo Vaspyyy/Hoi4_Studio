@@ -53,7 +53,7 @@ class ProjectTab(QWidget):
         )
         r2, self.user_mods, b2 = row(
             "User Mods",
-            "Path to the Paradox user mods folder (e.g., ~/.local/share/Paradox Interactive/Hearts of Iron IV/mod)",
+            "Path to the Paradox user mods folder (Linux: ~/.local/share/Paradox Interactive/Hearts of Iron IV/mod, Windows: Documents\\Paradox Interactive\\Hearts of Iron IV\\mod)",
         )
         r3, self.mod_root, b3 = row("Mod Root", "Path to your mod's root directory")
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from .parser import extract_braced_block
 
 
@@ -136,30 +136,117 @@ def _find_toplevel_blocks(text: str) -> list[tuple[str, str]]:
     return blocks
 
 
-def read_ideas_file(mod_root: Path, tag: str) -> Dict[str, Any]:
-    ideas_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_ideas.txt"
-    dynamic_ideas_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_dynamic_ideas.txt"
+def _parse_idea_body(idea_id: str, idea_body: str) -> Dict[str, Any]:
+    idea_obj: Dict[str, Any] = {"id": idea_id.strip()}
+    pic = re.search(r"picture\s*=\s*([^\n\r]+)", idea_body)
+    if pic:
+        idea_obj["icon"] = pic.group(1).strip()
+    modifier_body = _extract_braced_block_content(idea_body, "modifier")
+    if modifier_body:
+        idea_obj["modifier"] = _parse_kv_properties(modifier_body)
+    return idea_obj
 
+
+def _find_history_file(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
+) -> Optional[Path]:
+    for base in [mod_root, hoi4_install]:
+        if base is None:
+            continue
+        d = base / "history" / "countries"
+        if not d.is_dir():
+            continue
+        for cand in d.glob(f"{tag} - *.txt"):
+            return cand
+        for cand in d.glob(f"{tag}*.txt"):
+            return cand
+    return None
+
+
+def read_assigned_ideas(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
+) -> List[str]:
+    history_file = _find_history_file(mod_root, tag, hoi4_install)
+    if history_file is None:
+        return []
+
+    text = history_file.read_text(encoding="utf-8", errors="ignore")
+    assigned: List[str] = []
+    removed: set[str] = set()
+
+    for m in re.finditer(r"add_ideas\s*=\s*\{", text):
+        start = m.end()
+        try:
+            block, _ = extract_braced_block(text, start)
+        except ValueError:
+            continue
+        for idea_match in re.finditer(r"\b([a-zA-Z][a-zA-Z0-9_]*)\b", block):
+            idea_id = idea_match.group(1)
+            if idea_id.lower() not in ("yes", "no", "always", "and", "or", "not", "tag"):
+                assigned.append(idea_id)
+
+    for m in re.finditer(r"remove_ideas\s*=\s*\{", text):
+        start = m.end()
+        try:
+            block, _ = extract_braced_block(text, start)
+        except ValueError:
+            continue
+        for idea_match in re.finditer(r"\b([a-zA-Z][a-zA-Z0-9_]*)\b", block):
+            removed.add(idea_match.group(1))
+
+    for m in re.finditer(r"remove_ideas\s*=\s*([a-zA-Z][a-zA-Z0-9_]*)", text):
+        removed.add(m.group(1))
+
+    return [idea for idea in dict.fromkeys(assigned) if idea not in removed]
+
+
+def _read_vanilla_country_ideas(hoi4_install: Path, tag: str) -> List[Dict[str, Any]]:
+    ideas_dir = hoi4_install / "common" / "ideas"
+    if not ideas_dir.is_dir():
+        return []
+
+    results: List[Dict[str, Any]] = []
+    tag_pat = re.compile(rf"original_tag\s*=\s*{re.escape(tag)}\b", re.IGNORECASE)
+
+    for ideas_file in ideas_dir.glob("*.txt"):
+        try:
+            content = ideas_file.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+
+        outer = _extract_braced_block_content(content, "ideas")
+        if not outer:
+            continue
+        country_block = _extract_braced_block_content(outer, "country")
+        if not country_block:
+            continue
+
+        for idea_id, idea_body in _find_toplevel_blocks(country_block):
+            allowed_block = _extract_braced_block_content(idea_body, "allowed")
+            if allowed_block and tag_pat.search(allowed_block):
+                results.append(_parse_idea_body(idea_id, idea_body))
+
+    return results
+
+
+def read_ideas_file(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
+) -> Dict[str, Any]:
     ideas_data: Dict[str, Any] = {"static": [], "dynamic": []}
 
-    if ideas_file.exists():
-        content = ideas_file.read_text(encoding="utf-8", errors="ignore")
+    mod_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_ideas.txt"
+    if mod_file.exists():
+        content = mod_file.read_text(encoding="utf-8", errors="ignore")
         container = _extract_braced_block_content(content, "country_ideas")
         for idea_id, idea_body in _find_toplevel_blocks(container):
-            idea_obj: Dict[str, Any] = {"id": idea_id.strip()}
-            icon_match = re.search(r"icon\s*=\s*([^\n\r]+)", idea_body)
-            if icon_match:
-                idea_obj["icon"] = icon_match.group(1).strip()
-            modifier_body = _extract_braced_block_content(idea_body, "modifier")
-            if modifier_body:
-                idea_obj["modifier"] = _parse_kv_properties(modifier_body)
-            ideas_data["static"].append(idea_obj)
+            ideas_data["static"].append(_parse_idea_body(idea_id, idea_body))
 
-    if dynamic_ideas_file.exists():
-        content = dynamic_ideas_file.read_text(encoding="utf-8", errors="ignore")
+    dynamic_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_dynamic_ideas.txt"
+    if dynamic_file.exists():
+        content = dynamic_file.read_text(encoding="utf-8", errors="ignore")
         container = _extract_braced_block_content(content, "dynamic_country_ideas")
         for idea_id, idea_body in _find_toplevel_blocks(container):
-            idea_obj = {"id": idea_id.strip()}
+            idea_obj: Dict[str, Any] = {"id": idea_id.strip()}
             potential_body = _extract_braced_block_content(idea_body, "potential")
             if potential_body:
                 idea_obj["potential"] = _parse_kv_properties(potential_body)
@@ -170,5 +257,8 @@ def read_ideas_file(mod_root: Path, tag: str) -> Dict[str, Any]:
             if modifier_body:
                 idea_obj["modifier"] = _parse_kv_properties(modifier_body)
             ideas_data["dynamic"].append(idea_obj)
+
+    if not ideas_data["static"] and hoi4_install:
+        ideas_data["static"] = _read_vanilla_country_ideas(hoi4_install, tag)
 
     return ideas_data

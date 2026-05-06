@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..theme import AnimatedButton, create_card_widget, create_section_title
-from ..ideas import write_ideas_file, read_ideas_file
+from ..ideas import write_ideas_file, read_ideas_file, read_assigned_ideas
 from ..modifiers_catalog import ALL_MODIFIERS, MODIFIER_CATEGORIES
 from ..widgets import TagPickerWidget
 from ..commands import GenericCommand
@@ -132,7 +132,12 @@ class IdeasTab(QWidget):
 
         layout.addWidget(modifiers_tab_widget)
 
-        layout.addWidget(QLabel("Current Ideas"))
+        layout.addWidget(QLabel("Assigned Ideas (from country history)"))
+        self.assigned_list = QListWidget()
+        self.assigned_list.setToolTip("Ideas currently assigned to this country via add_ideas in its history file")
+        layout.addWidget(self.assigned_list)
+
+        layout.addWidget(QLabel("Available Ideas (from idea definitions)"))
         self.ideas_list = QListWidget()
         self.ideas_list.setToolTip("Double-click to load an idea for editing")
         self.ideas_list.itemDoubleClicked.connect(self.load_idea_for_editing)
@@ -172,13 +177,28 @@ class IdeasTab(QWidget):
         tag = self.tag_picker.current_tag()
         if not tag or tag == "(NONE)":
             return
-        ideas_data = read_ideas_file(self.mw.paths.mod_root, tag)
+
+        hoi4 = self.mw.paths.hoi4_install
+        mod = self.mw.paths.mod_root
+
+        assigned_ids = read_assigned_ideas(mod, tag, hoi4)
+        self.assigned_list.clear()
+        for idea_id in assigned_ids:
+            list_item = QListWidgetItem(idea_id)
+            list_item.setData(Qt.ItemDataRole.UserRole, {"id": idea_id})
+            self.assigned_list.addItem(list_item)
+
+        ideas_data = read_ideas_file(mod, tag, hoi4)
         self.ideas_list.clear()
         for idea in ideas_data.get("static", []):
             list_item = QListWidgetItem(f"{idea['id']}: {idea.get('name', '')}")
             list_item.setData(Qt.ItemDataRole.UserRole, idea)
             self.ideas_list.addItem(list_item)
-        self.mw.log_panel.log(f"Loaded ideas for {tag}", "info")
+        for idea in ideas_data.get("dynamic", []):
+            list_item = QListWidgetItem(f"{idea['id']}: {idea.get('name', '')} (dynamic)")
+            list_item.setData(Qt.ItemDataRole.UserRole, idea)
+            self.ideas_list.addItem(list_item)
+        self.mw.log_panel.log(f"Loaded ideas for {tag} ({len(assigned_ids)} assigned, {self.ideas_list.count()} available)", "info")
 
     def load_idea_for_editing(self, item: QListWidgetItem) -> None:
         idea_obj = item.data(Qt.ItemDataRole)

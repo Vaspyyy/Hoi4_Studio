@@ -5,11 +5,16 @@ HOI4 Modding Studio - Settings Management
 from __future__ import annotations
 
 import json
+import os
+import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 
-APP_DIR = Path.home() / ".config" / "hoi4-modding-studio"
+if sys.platform == "win32":
+    APP_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "hoi4-modding-studio"
+else:
+    APP_DIR = Path.home() / ".config" / "hoi4-modding-studio"
 SETTINGS_FILE = APP_DIR / "settings.json"
 
 

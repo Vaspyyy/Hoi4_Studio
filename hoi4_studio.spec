@@ -1,12 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-datas = []
-datas += collect_data_files("PySide6")
-datas += [("assets/logo.png", "assets")]
+datas = [
+    ("assets/logo.png", "assets"),
+]
 
-hiddenimports = collect_submodules("PySide6")
-hiddenimports += ["scipy", "numpy"]
+hiddenimports = [
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+    "scipy",
+    "numpy",
+]
 
 a = Analysis(
     ["run.py"],

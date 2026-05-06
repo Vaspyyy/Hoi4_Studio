@@ -1,0 +1,37 @@
+name: Bug Report
+description: Report a crash or bug in HOI4 Modding Studio
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Paste the generated bug report below** (use Ctrl+V after clicking "Send Bug Report" in the error dialog).
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Bug Report
+      description: Paste the full bug report from the crash dialog here
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Which version are you using?
+      placeholder: "e.g. v0.3.3"
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux
+        - Other
+    validations:
+      required: true

@@ -394,7 +394,11 @@ class _NoScrollFilter(QObject):
 
 
 def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
-    """Show a crash dialog with Copy Bug Report and Open Log File buttons."""
+    """Show a crash dialog with Send Bug Report and Open Log File buttons."""
+    import webbrowser
+
+    ISSUES_URL = "https://github.com/Vaspyyy/Hoi4_Studio/issues/new?template=bug_report.yml"
+
     try:
         from PySide6.QtWidgets import (
             QApplication,
@@ -405,7 +409,6 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
             QTextEdit,
             QVBoxLayout,
         )
-        from PySide6.QtGui import QClipboard
 
         app = QApplication.instance()
         if app is None:
@@ -413,7 +416,7 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
 
         dlg = QDialog()
         dlg.setWindowTitle("HOI4 Modding Studio - Error")
-        dlg.setMinimumSize(520, 380)
+        dlg.setMinimumSize(560, 420)
         layout = QVBoxLayout(dlg)
 
         title = QLabel("HOI4 Modding Studio encountered an error")
@@ -425,9 +428,12 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
         msg.setStyleSheet("font-size: 12px; padding: 4px 0;")
         layout.addWidget(msg)
 
-        report_label = QLabel("Bug report (click Copy to share):")
-        report_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
-        layout.addWidget(report_label)
+        hint = QLabel(
+            "Click <b>Send Bug Report</b> to open a GitHub issue with this report."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("font-size: 11px; padding: 4px 0; color: #8b949e;")
+        layout.addWidget(hint)
 
         from .logging_setup import build_crash_report
 
@@ -441,11 +447,12 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
 
         btn_row = QHBoxLayout()
 
-        def _copy_report():
-            QApplication.clipboard().setText(report_text.toPlainText())
-            for b in (btn_copy,):
-                b.setText("Copied!")
-                b.setEnabled(False)
+        def _send_report():
+            report = report_text.toPlainText()
+            QApplication.clipboard().setText(report)
+            webbrowser.open(ISSUES_URL)
+            btn_send.setText("Sent! Paste into issue body and submit.")
+            btn_send.setEnabled(False)
 
         def _open_log():
             if log_file and log_file.exists():
@@ -454,9 +461,10 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
                 else:
                     subprocess.run(["xdg-open", str(log_file)], check=False)
 
-        btn_copy = QPushButton("Copy Bug Report")
-        btn_copy.setMinimumHeight(34)
-        btn_copy.clicked.connect(_copy_report)
+        btn_send = QPushButton("Send Bug Report")
+        btn_send.setMinimumHeight(34)
+        btn_send.setToolTip("Copies report to clipboard and opens GitHub issue form — paste (Ctrl+V) and submit")
+        btn_send.clicked.connect(_send_report)
 
         btn_log = QPushButton("Open Log File")
         btn_log.setMinimumHeight(34)
@@ -468,7 +476,7 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
         btn_close.setMinimumHeight(34)
         btn_close.clicked.connect(dlg.close)
 
-        btn_row.addWidget(btn_copy)
+        btn_row.addWidget(btn_send)
         btn_row.addWidget(btn_log)
         btn_row.addStretch()
         btn_row.addWidget(btn_close)

@@ -6,7 +6,11 @@ This function finds mod files in the user mod folder.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+
+logger = logging.getLogger("hoi4_studio.mod_finder")
 
 
 def find_mods_in_user_mod_folder(user_mods_dir: Path):
@@ -21,6 +25,7 @@ def find_mods_in_user_mod_folder(user_mods_dir: Path):
     """
     mods = []
     if not user_mods_dir.exists():
+        logger.warning("User mods dir does not exist: %s", user_mods_dir)
         return mods
     for f in sorted(user_mods_dir.glob("*.mod")):
         try:
@@ -33,6 +38,8 @@ def find_mods_in_user_mod_folder(user_mods_dir: Path):
                     break
             if path:
                 mods.append((f.name, Path(path)))
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to parse mod descriptor %s: %s", f, e)
             continue
+    logger.info("Found %d mod(s) in %s", len(mods), user_mods_dir)
     return mods

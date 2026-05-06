@@ -264,6 +264,8 @@ def _resolve_colors(
 def _load_water_texture(
     mod_root: Optional[Path], h: int, w: int, hoi4_install: Optional[Path] = None
 ) -> Optional[np.ndarray]:
+    import logging
+    _wl = logging.getLogger("hoi4_studio.world_map")
     for base in [mod_root, hoi4_install]:
         if base is None:
             continue
@@ -283,6 +285,7 @@ def _load_water_texture(
                     timeout=30,
                 )
             if result.returncode != 0:
+                _wl.debug("ImageMagick failed to decode %s (rc=%d)", dds_path, result.returncode)
                 continue
             from io import BytesIO
 
@@ -290,8 +293,10 @@ def _load_water_texture(
             arr = np.array(img, dtype=np.uint8)
             if arr.shape[:2] == (h, w):
                 return arr
-        except Exception:
+        except Exception as e:
+            _wl.debug("Failed to load water texture %s: %s", dds_path, e)
             continue
+    _wl.debug("No water texture found")
     return None
 
 

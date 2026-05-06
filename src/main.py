@@ -6,6 +6,9 @@ Slim MainWindow that delegates to tab modules.
 
 from __future__ import annotations
 
+import logging
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -32,6 +35,7 @@ from PySide6.QtWidgets import (
 from .sliding_tab import SlidingTabWidget
 
 from .settings import (
+    APP_DIR,
     HOI4Paths,
     load_settings,
     save_settings,
@@ -58,6 +62,8 @@ from .tabs.ideas_tab import IdeasTab
 from .tabs.localization_tab import LocalizationManagerTab
 from .tabs.map_generator_tab import MapGeneratorTab
 
+logger = logging.getLogger("hoi4_studio.main")
+
 
 class MainWindow(QMainWindow):
     paths_changed = Signal()
@@ -66,17 +72,22 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("HOI4 Modding Studio")
+        logger.info("Initializing MainWindow")
         if getattr(sys, "frozen", False):
             icon_path = Path(sys._MEIPASS) / "assets" / "logo.png"
         else:
             icon_path = Path(__file__).parent.parent / "assets" / "logo.png"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
+        else:
+            logger.debug("Logo not found at %s", icon_path)
         self.settings = load_settings()
+        logger.info("Settings: theme=%s, window=%dx%d", self.settings.theme, self.settings.window_width, self.settings.window_height)
         self.paths: Optional[HOI4Paths] = None
         self._changes: list[str] = []
         self.resize(self.settings.window_width, self.settings.window_height)
 
+        logger.debug("Creating tab widget")
         tabs = SlidingTabWidget()
         tabs.setMinimumSize(0, 0)
         self.setCentralWidget(tabs)
@@ -131,6 +142,7 @@ class MainWindow(QMainWindow):
         self._setup_menus()
         self._setup_autosave()
         self._apply_current_theme()
+        logger.info("MainWindow ready: %d tabs", self.tabs.count())
 
     def _setup_menus(self) -> None:
         menubar = self.menuBar()
@@ -381,28 +393,113 @@ class _NoScrollFilter(QObject):
         return False
 
 
-def _show_crash_dialog(msg: str) -> None:
+def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
+    """Show a crash dialog with Copy Bug Report and Open Log File buttons."""
     try:
-        from PySide6.QtWidgets import QApplication, QMessageBox
+        from PySide6.QtWidgets import (
+            QApplication,
+            QDialog,
+            QHBoxLayout,
+            QLabel,
+            QPushButton,
+            QTextEdit,
+            QVBoxLayout,
+        )
+        from PySide6.QtGui import QClipboard
 
         app = QApplication.instance()
         if app is None:
             app = QApplication([])
-        QMessageBox.critical(None, "HOI4 Modding Studio - Error", msg)
+
+        dlg = QDialog()
+        dlg.setWindowTitle("HOI4 Modding Studio - Error")
+        dlg.setMinimumSize(520, 380)
+        layout = QVBoxLayout(dlg)
+
+        title = QLabel("HOI4 Modding Studio encountered an error")
+        title.setStyleSheet("font-weight: 700; font-size: 14px; margin-bottom: 4px;")
+        layout.addWidget(title)
+
+        msg = QLabel(error_msg)
+        msg.setWordWrap(True)
+        msg.setStyleSheet("font-size: 12px; padding: 4px 0;")
+        layout.addWidget(msg)
+
+        report_label = QLabel("Bug report (click Copy to share):")
+        report_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        layout.addWidget(report_label)
+
+        from .logging_setup import build_crash_report
+
+        report_text = QTextEdit()
+        report_text.setReadOnly(True)
+        report_text.setPlainText(build_crash_report(error_msg))
+        report_text.setStyleSheet(
+            "font-family: monospace; font-size: 10px; background: #0d1117; color: #c9d1d9;"
+        )
+        layout.addWidget(report_text)
+
+        btn_row = QHBoxLayout()
+
+        def _copy_report():
+            QApplication.clipboard().setText(report_text.toPlainText())
+            for b in (btn_copy,):
+                b.setText("Copied!")
+                b.setEnabled(False)
+
+        def _open_log():
+            if log_file and log_file.exists():
+                if sys.platform == "win32":
+                    os.startfile(str(log_file))
+                else:
+                    subprocess.run(["xdg-open", str(log_file)], check=False)
+
+        btn_copy = QPushButton("Copy Bug Report")
+        btn_copy.setMinimumHeight(34)
+        btn_copy.clicked.connect(_copy_report)
+
+        btn_log = QPushButton("Open Log File")
+        btn_log.setMinimumHeight(34)
+        btn_log.clicked.connect(_open_log)
+        if not log_file or not log_file.exists():
+            btn_log.setEnabled(False)
+
+        btn_close = QPushButton("Close")
+        btn_close.setMinimumHeight(34)
+        btn_close.clicked.connect(dlg.close)
+
+        btn_row.addWidget(btn_copy)
+        btn_row.addWidget(btn_log)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        dlg.setStyleSheet(
+            "QDialog { background: #161b22; color: #c9d1d9; }"
+            "QPushButton { background: #21262d; border: 1px solid #30363d; border-radius: 6px; "
+            "  padding: 6px 16px; color: #c9d1d9; }"
+            "QPushButton:hover { background: #30363d; }"
+            "QPushButton:disabled { color: #484f58; }"
+        )
+        dlg.exec()
     except Exception:
         if sys.platform == "win32":
             import ctypes
-
-            ctypes.windll.user32.MessageBoxW(0, msg, "HOI4 Modding Studio - Error", 0x10)
+            ctypes.windll.user32.MessageBoxW(0, error_msg, "HOI4 Modding Studio - Error", 0x10)
         else:
-            import traceback
-
-            traceback.print_exc()
-            print(f"\nFATAL: {msg}", file=sys.stderr)
+            print(f"FATAL: {error_msg}", file=sys.stderr)
 
 
 def main():
+    logger = None
+    log_file = None
     try:
+        from .logging_setup import setup_logging, get_log_file
+
+        logger = setup_logging(APP_DIR)
+        log_file = get_log_file()
+        logger.info("Application starting")
+
         app = QApplication([])
 
         no_scroll = _NoScrollFilter()
@@ -413,9 +510,17 @@ def main():
         w.tabs.setCurrentIndex(0)
 
         w.show()
+        logger.info("Main window shown, entering event loop")
         app.exec()
     except Exception as e:
-        _show_crash_dialog(f"Failed to start:\n\n{e}")
+        import traceback
+        tb = traceback.format_exc()
+        try:
+            if logger:
+                logger.critical("Startup failed:\n%s", tb)
+        except Exception:
+            pass
+        _show_crash_dialog(f"{e}\n\n{tb}", log_file)
         raise
 
 

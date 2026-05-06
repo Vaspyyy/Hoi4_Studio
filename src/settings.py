@@ -5,11 +5,14 @@ HOI4 Modding Studio - Settings Management
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
+
+logger = logging.getLogger("hoi4_studio.settings")
 
 if sys.platform == "win32":
     APP_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "hoi4-modding-studio"
@@ -41,7 +44,9 @@ class HOI4Paths:
 
 def load_settings() -> AppSettings:
     APP_DIR.mkdir(parents=True, exist_ok=True)
+    logger.debug("APP_DIR: %s", APP_DIR)
     if not SETTINGS_FILE.exists():
+        logger.info("No settings file found, using defaults")
         return AppSettings()
     try:
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -49,14 +54,17 @@ def load_settings() -> AppSettings:
         for k, v in data.items():
             if hasattr(s, k):
                 setattr(s, k, v)
+        logger.info("Settings loaded from %s", SETTINGS_FILE)
         return s
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to load settings: %s", e)
         return AppSettings()
 
 
 def save_settings(s: AppSettings) -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(json.dumps(asdict(s), indent=2), encoding="utf-8")
+    logger.debug("Settings saved to %s", SETTINGS_FILE)
 
 
 def save_editor_state(state: dict) -> None:

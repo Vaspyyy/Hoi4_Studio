@@ -27,3 +27,6 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .opencode/
+
+# Debug logs
+*.log

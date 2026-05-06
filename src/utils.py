@@ -4,10 +4,14 @@ HOI4 Modding Studio - Utility Functions
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import shutil
 from pathlib import Path
 from PIL import Image
+
+
+logger = logging.getLogger("hoi4_studio.utils")
 
 
 def nuclear_delete_mod(
@@ -46,7 +50,10 @@ def import_flag_to_mod(
 
 
 def _have_magick() -> bool:
-    return shutil.which("magick") is not None or shutil.which("convert") is not None
+    found = shutil.which("magick") is not None or shutil.which("convert") is not None
+    if not found:
+        logger.warning("ImageMagick not found on PATH")
+    return found
 
 
 def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: Path) -> Path:
@@ -63,10 +70,12 @@ def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: 
             "ImageMagick is required for DDS portrait export. "
             "Install it from https://imagemagick.org/script/download.php"
         )
+    logger.debug("Converting %s → %s (DXT5)", png.name, dds.name)
     subprocess.run(
         ["magick", str(png), "-define", "dds:compression=dxt5", str(dds)],
         check=True,
     )
     if not dds.exists():
         raise RuntimeError("DDS conversion failed — check that ImageMagick is installed and on PATH")
+    logger.info("Portrait exported: %s", dds)
     return dds

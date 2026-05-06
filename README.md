@@ -42,3 +42,8 @@ python run.py
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
+
+## Downloads
+
+Pre-built Windows executables are available on the [Releases page](https://github.com/Vaspyyy/Hoi4_Studio/releases).
+Download `HOI4-Modding-Studio-Windows.zip`, unzip, and run `HOI4 Modding Studio.exe` — no Python required.

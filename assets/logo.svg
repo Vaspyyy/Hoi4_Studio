@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="hexGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a5e50"/>
+      <stop offset="100%" stop-color="#1f3a2e"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e8c547"/>
+      <stop offset="100%" stop-color="#a07828"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="118" fill="#141424" stroke="#2a2a40" stroke-width="2"/>
+
+  <!-- Outer ring -->
+  <circle cx="128" cy="128" r="114" fill="none" stroke="#c9a84c" stroke-width="1.5" opacity="0.3"/>
+
+  <!-- Connecting lines -->
+  <g stroke="#c9a84c" stroke-width="2.5" opacity="0.5" stroke-linecap="round">
+    <line x1="52" y1="88" x2="30" y2="68"/>
+    <line x1="52" y1="168" x2="30" y2="188"/>
+    <line x1="204" y1="88" x2="226" y2="68"/>
+    <line x1="204" y1="168" x2="226" y2="188"/>
+    <line x1="128" y1="44" x2="128" y2="22"/>
+    <line x1="128" y1="212" x2="128" y2="234"/>
+  </g>
+
+  <!-- Connection nodes -->
+  <g fill="#1f3a2e" stroke="#c9a84c" stroke-width="2">
+    <circle cx="30" cy="68" r="7"/>
+    <circle cx="30" cy="188" r="7"/>
+    <circle cx="226" cy="68" r="7"/>
+    <circle cx="226" cy="188" r="7"/>
+    <circle cx="128" cy="22" r="7"/>
+    <circle cx="128" cy="234" r="7"/>
+  </g>
+
+  <!-- Main hexagon -->
+  <polygon points="128,44 204,88 204,168 128,212 52,168 52,88"
+           fill="url(#hexGrad)" stroke="#c9a84c" stroke-width="4" stroke-linejoin="round"/>
+
+  <!-- Inner star -->
+  <polygon points="128,82 151,118 192,124 165,153 171,194 128,173 85,194 91,153 64,124 105,118"
+           fill="url(#goldGrad)" opacity="0.85"/>
+
+  <!-- Inner glow -->
+  <circle cx="128" cy="144" r="18" fill="#e8c547" opacity="0.2"/>
+
+  <!-- "HMS" text -->
+  <text x="128" y="155" text-anchor="middle" font-family="Arial,sans-serif"
+        font-size="28" font-weight="900" fill="#e8c547" opacity="0.9"
+        letter-spacing="4">HMS</text>
+</svg>

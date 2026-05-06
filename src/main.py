@@ -6,10 +6,12 @@ Slim MainWindow that delegates to tab modules.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QTimer, Signal, QEvent, QObject
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -64,6 +66,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("HOI4 Modding Studio")
+        if getattr(sys, "frozen", False):
+            icon_path = Path(sys._MEIPASS) / "assets" / "logo.png"
+        else:
+            icon_path = Path(__file__).parent.parent / "assets" / "logo.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.settings = load_settings()
         self.paths: Optional[HOI4Paths] = None
         self._changes: list[str] = []

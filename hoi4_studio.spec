@@ -3,6 +3,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 datas = []
 datas += collect_data_files("PySide6")
+datas += [("assets/logo.png", "assets")]
 
 hiddenimports = collect_submodules("PySide6")
 hiddenimports += ["scipy", "numpy"]
@@ -38,7 +39,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon="assets/logo.ico",
 )
 
 coll = COLLECT(

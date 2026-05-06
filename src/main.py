@@ -381,18 +381,42 @@ class _NoScrollFilter(QObject):
         return False
 
 
+def _show_crash_dialog(msg: str) -> None:
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication([])
+        QMessageBox.critical(None, "HOI4 Modding Studio - Error", msg)
+    except Exception:
+        if sys.platform == "win32":
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, msg, "HOI4 Modding Studio - Error", 0x10)
+        else:
+            import traceback
+
+            traceback.print_exc()
+            print(f"\nFATAL: {msg}", file=sys.stderr)
+
+
 def main():
-    app = QApplication([])
+    try:
+        app = QApplication([])
 
-    no_scroll = _NoScrollFilter()
-    app.installEventFilter(no_scroll)
+        no_scroll = _NoScrollFilter()
+        app.installEventFilter(no_scroll)
 
-    w = MainWindow()
+        w = MainWindow()
 
-    w.tabs.setCurrentIndex(0)
+        w.tabs.setCurrentIndex(0)
 
-    w.show()
-    app.exec()
+        w.show()
+        app.exec()
+    except Exception as e:
+        _show_crash_dialog(f"Failed to start:\n\n{e}")
+        raise
 
 
 if __name__ == "__main__":

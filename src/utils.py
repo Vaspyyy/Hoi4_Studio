@@ -55,19 +55,18 @@ def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: 
     size = (156, 210)
     png = out_dir / f"{name_slug}.png"
     dds = out_dir / f"{name_slug}.dds"
-    tga = out_dir / f"{name_slug}.tga"
     with Image.open(src_image) as img:
         rgba = img.convert("RGBA").resize(size, Image.LANCZOS)
     rgba.save(png, format="PNG")
-    if _have_magick():
-        try:
-            subprocess.run(
-                ["magick", str(png), "-define", "dds:compression=dxt5", str(dds)],
-                check=True,
-            )
-            if dds.exists():
-                return dds
-        except Exception:
-            pass
-    rgba.save(tga, format="TGA")
-    return tga
+    if not _have_magick():
+        raise RuntimeError(
+            "ImageMagick is required for DDS portrait export. "
+            "Install it from https://imagemagick.org/script/download.php"
+        )
+    subprocess.run(
+        ["magick", str(png), "-define", "dds:compression=dxt5", str(dds)],
+        check=True,
+    )
+    if not dds.exists():
+        raise RuntimeError("DDS conversion failed — check that ImageMagick is installed and on PATH")
+    return dds

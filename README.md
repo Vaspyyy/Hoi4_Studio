@@ -18,15 +18,21 @@ A fully-featured IDE for creating Hearts of Iron 4 mods. Works on Windows and Li
 - Map generator
 - Dark / light theme support
 
+## Requirements
+
+- [ImageMagick](https://imagemagick.org/script/download.php) — required for DDS texture export
+- Python 3.11+ (if running from source)
+- PySide6, Pillow, numpy, scipy (auto-installed via pip if running from source)
+
 ## Quick Start
 
-### Windows (pre-built .exe)
+### Windows
 
-Download `HOI4-Modding-Studio-Windows.zip` from [Releases](https://github.com/Vaspyyy/Hoi4_Studio/releases), unzip, and run `HOI4 Modding Studio.exe` — no Python required.
+1. Install [ImageMagick](https://imagemagick.org/script/download.php) (check "Install legacy utilities" during setup)
+2. Download `HOI4-Modding-Studio-Windows.zip` from [Releases](https://github.com/Vaspyyy/Hoi4_Studio/releases)
+3. Unzip and run `HOI4 Modding Studio.exe`
 
 ### Install from source
-
-Requires Python 3.11+.
 
 ```bash
 python -m venv venv
@@ -35,8 +41,6 @@ source venv/bin/activate          # Linux
 pip install -r requirements.txt
 python run.py
 ```
-
-**Optional:** Install [ImageMagick](https://imagemagick.org/script/download.php) for DDS portrait export (TGA fallback works without it).
 
 ## Development
 

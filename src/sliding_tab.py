@@ -77,13 +77,20 @@ class SlidingTabWidget(QWidget):
         self._tab_bar.setCurrentIndex(idx)
 
     def _on_tab_bar_changed(self, new_idx):
-        if self._animating:
-            return
-        if new_idx == self._current_index:
+        if new_idx == self._current_index and not self._animating:
             return
         if new_idx < 0 or new_idx >= len(self._pages):
             return
-        self._animate_slide(self._current_index, new_idx)
+        if self._animating:
+            self._anim_old.stop()
+            self._anim_new.stop()
+            for page in self._pages:
+                page.hide()
+            self._pages[self._current_index].setGeometry(self._container.rect())
+            self._pages[self._current_index].show()
+            self._animating = False
+        if new_idx != self._current_index:
+            self._animate_slide(self._current_index, new_idx)
 
     def _animate_slide(self, old_idx, new_idx):
         self._animating = True

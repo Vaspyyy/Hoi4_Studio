@@ -12,6 +12,9 @@ from typing import Optional
 from .parser import parse_pdx, serialize_pdx, PdxNode
 
 
+# TODO: _state_file_cache never invalidated after write_state_properties
+# — after writing a state file, cached paths become stale. Call
+# _clear_state_file_cache() after any state file mutation.
 _state_file_cache: dict[str, Optional[Path]] = {}
 
 
@@ -252,6 +255,8 @@ def read_state_properties(state_file: Path) -> dict:
             result["cores"] = cores
 
         vp_nodes = history.find_all("victory_points")
+        # TODO: victory points parsing logic is opaque — document that VP blocks
+        # contain {int_1 int_2} {int_3} style nested nodes.
         vp_parts: list[str] = []
         for vp in vp_nodes:
             if vp.is_block():

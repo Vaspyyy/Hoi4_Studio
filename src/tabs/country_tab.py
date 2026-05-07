@@ -169,6 +169,8 @@ def read_country_history(mod_root: Path, tag: str, hoi4_install: Optional[Path] 
 def read_country_localisation(
     mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
 ) -> dict:
+    # TODO: rglob over entire localisation dir decodes every .yml per tag lookup;
+    # cache parsed results or index by tag to avoid O(n*m) file I/O.
     for base in [mod_root, hoi4_install]:
         if base is None:
             continue

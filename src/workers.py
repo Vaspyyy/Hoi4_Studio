@@ -1,5 +1,8 @@
 """
 HOI4 Modding Studio - Background Workers
+
+TODO: no test coverage for StateIndexWorker, LocalisationParseWorker,
+or StateApplyWorker. Test cancellation, error propagation, and signal ordering.
 """
 
 from __future__ import annotations

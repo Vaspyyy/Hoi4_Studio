@@ -55,6 +55,8 @@ class WelcomeTab(QWidget):
         qs_row = QHBoxLayout()
         qs_row.setSpacing(12)
 
+        # TODO: both buttons jump to tab index 1 (Project) without differentiation.
+        # "New Mod" should open project tab with a "create if missing" flag or wizard.
         btn_open = AnimatedButton("Open Project", accent_color="#818CF8")
         btn_open.setToolTip("Load an existing mod project by setting paths")
         btn_open.clicked.connect(lambda: self.mw.tabs.setCurrentIndex(1))

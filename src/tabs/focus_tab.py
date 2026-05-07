@@ -112,6 +112,8 @@ class FocusNodeItem(QGraphicsRectItem):
 
 
 class FocusLinkItem(QGraphicsItem):
+    # TODO: duplicated in world_map_tab.py and states.py; consolidate shared
+    # regex patterns into a src/patterns.py module.
     def __init__(self, a: FocusNodeItem, b: FocusNodeItem):
         super().__init__()
         self.a = a
@@ -131,6 +133,8 @@ class FocusLinkItem(QGraphicsItem):
 
 
 class MinimapView(QWidget):
+    # TODO: self._scale = 0.08 is set but never used — paint recomputes scale
+    # from scene rect. Remove dead field or use as configurable base scale.
     def __init__(self, scene: QGraphicsScene, parent=None):
         super().__init__(parent)
         self.scene = scene

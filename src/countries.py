@@ -213,6 +213,8 @@ def generate_mod_descriptor(
     else:
         content += '"Alternative" "Gameplay" "National Focuses"'
     content += "}\n"
+    # TODO: supported_version="1.14.*" hardcoded — make configurable or derive
+    # from the HOI4 install's launcher-settings.json.
     content += 'supported_version="1.14.*"\npicture="thumbnail.png"\n'
 
     desc.write_text(content, encoding="utf-8", errors="ignore")

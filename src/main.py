@@ -145,6 +145,7 @@ class MainWindow(QMainWindow):
         logger.info("MainWindow ready: %d tabs", self.tabs.count())
 
     def _setup_menus(self) -> None:
+        # TODO: add Ctrl+1..Ctrl+9 shortcuts to jump to specific tabs.
         menubar = self.menuBar()
 
         file_menu = menubar.addMenu("&File")
@@ -257,7 +258,8 @@ class MainWindow(QMainWindow):
         self._propagate_theme_to_buttons(colors)
 
     def _propagate_theme_to_buttons(self, colors) -> None:
-
+        # TODO: full widget tree recursion on every theme switch causes lag
+        # on 10+ tabs — use a signal-based approach instead.
         for i in range(self.tabs.count()):
             widget = self.tabs.widget(i)
             inner = widget.widget() if isinstance(widget, QScrollArea) else widget
@@ -283,6 +285,7 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(idx - 1)
 
     def _show_about(self) -> None:
+        # TODO: read version from pyproject.toml instead of hardcoding "v0.3".
         QMessageBox.about(
             self,
             "About HOI4 Modding Studio",
@@ -397,6 +400,8 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
     """Show a crash dialog with Send Bug Report and Open Log File buttons."""
     import webbrowser
 
+    # TODO: ISSUES_URL should be read from pyproject.toml or a config constant,
+    # not hardcoded here.
     ISSUES_URL = "https://github.com/Vaspyyy/Hoi4_Studio/issues/new?template=bug_report.yml"
 
     try:
@@ -455,6 +460,7 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
             btn_send.setEnabled(False)
 
         def _open_log():
+            # TODO: add macOS handler via subprocess.run(["open", str(log_file)]).
             if log_file and log_file.exists():
                 if sys.platform == "win32":
                     os.startfile(str(log_file))

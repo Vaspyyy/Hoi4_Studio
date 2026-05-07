@@ -29,6 +29,8 @@ def find_mods_in_user_mod_folder(user_mods_dir: Path):
         return mods
     for f in sorted(user_mods_dir.glob("*.mod")):
         try:
+            # TODO: Path(path) from .mod descriptor is not validated for traversal
+            # or null bytes — sanitize before returning to consumers.
             txt = f.read_text(encoding="utf-8", errors="ignore")
             path = None
             for line in txt.splitlines():

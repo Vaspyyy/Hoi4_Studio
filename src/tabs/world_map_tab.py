@@ -78,6 +78,8 @@ def _fingerprint_dir(d: Path) -> Optional[tuple]:
 
 @dataclass
 class _MapCache:
+    # TODO: document caching strategy — 14 fields with no explanation of which
+    # fingerprint maps to which field, and when cache invalidation triggers.
     provinces_arr: Optional[np.ndarray] = None
     provinces_fp: Optional[tuple] = None
     rgb_to_prov: Optional[dict] = None
@@ -273,6 +275,9 @@ def _load_water_texture(
         if not dds_path.exists():
             continue
         try:
+            # TODO: ImageMagick subprocess has 30s timeout with no stderr logging —
+            # if magick hangs (common with corrupt DDS) the map render blocks silently.
+            # Also, use _have_magick() result to pick magick vs convert binary.
             result = subprocess.run(
                 ["magick", "convert", str(dds_path), "-resize", f"{w}x{h}!", "bmp:-"],
                 capture_output=True,
@@ -346,7 +351,10 @@ def _render_political_map(
     all_tags = set(state_owner.values())
     resolved_colors = _resolve_colors(country_colors, all_tags)
 
+    # TODO: 50MB 3D LUT (256x256x256x3) allocated per render — cache it or
+    # use a sparse approach to avoid OOM on systems with <8GB RAM.
     lut = np.full((256, 256, 256, 3), 30, dtype=np.uint8)
+    # TODO: ocean fallback color [30,80,160] hardcoded — make configurable via settings.
     lut[:, :, 1] = 80
     lut[:, :, 2] = 160
 
@@ -526,6 +534,8 @@ class MapRenderWorker(QThread):
 
     @staticmethod
     def _arr_to_qimage(arr: np.ndarray) -> QImage:
+        # TODO: QImage created from arr.data — if numpy array is GC'd before
+        # QImage renders, this segfaults. The .copy() below mitigates but narrow window.
         h, w = arr.shape[:2]
         qimg = QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888)
         return qimg.copy()

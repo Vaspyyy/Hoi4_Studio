@@ -33,6 +33,8 @@ class Token:
 
 
 def tokenize(text: str) -> list[Token]:
+    # TODO: split into _tokenize_string, _tokenize_number_or_ident, _tokenize_comment
+    # helpers — currently 72 lines of deeply nested conditionals with 6 if-c branches.
     tokens: list[Token] = []
     i = 0
     line = 1
@@ -80,6 +82,8 @@ def tokenize(text: str) -> list[Token]:
             continue
 
         if c == '"':
+            # TODO: unterminated quoted strings are silently swallowed —
+            # should raise a parse error with line/col info.
             start_col = col
             i += 1
             col += 1

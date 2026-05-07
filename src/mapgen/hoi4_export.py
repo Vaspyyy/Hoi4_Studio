@@ -4,6 +4,9 @@ import csv
 import json
 from pathlib import Path
 
+# TODO: all export functions lack try/except around file writes; a disk error
+# propagates silently to the UI thread via the worker's catch-all.
+
 
 def export_definition_csv(province_data: list[dict], path: str | Path) -> None:
     path = Path(path)

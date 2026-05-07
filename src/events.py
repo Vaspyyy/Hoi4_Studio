@@ -66,6 +66,8 @@ def generate_event_file(mod_root: Path, namespace: str, events: list[dict]) -> N
 
     p = mod_root / f"events/{namespace}_events.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
+    # TODO: wrap file writes in try/except for disk-full or permission errors;
+    # same issue in generate_event_localisation, focus.py, and mapgen exporters.
     p.write_text(out, encoding="utf-8")
 
 

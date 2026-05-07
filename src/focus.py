@@ -110,6 +110,8 @@ def export_focus_tree(mod_root: Path, tree_id: str, tag: str, nodes: list[dict])
     out += "}\n"
     p = mod_root / f"common/national_focus/{tag}_focus.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
+    # TODO: wrap file writes in try/except for disk-full or permission errors;
+    # currently failing silently — same issue in events.py and mapgen exporters.
     p.write_text(out, encoding="utf-8")
 
 

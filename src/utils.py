@@ -17,6 +17,8 @@ logger = logging.getLogger("hoi4_studio.utils")
 def nuclear_delete_mod(
     mod_root: Path, user_mods_dir: Path, descriptor_filename: str | None = None
 ) -> None:
+    # TODO: path guard is fragile — use Path.is_relative_to() against known safe dirs
+    # instead of len(parts) < 4 which rejects legitimate deep paths and passes clever ones.
     mod_root_resolved = mod_root.expanduser().resolve()
     if len(mod_root_resolved.parts) < 4:
         raise ValueError(f"Refusing to delete suspicious path: {mod_root_resolved}")
@@ -66,11 +68,15 @@ def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: 
         rgba = img.convert("RGBA").resize(size, Image.LANCZOS)
     rgba.save(png, format="PNG")
     if not _have_magick():
+        # TODO: ImageMagick detection cached at startup — offer manual re-check
+        # so users who install it while the app is running don't need a restart.
         raise RuntimeError(
             "ImageMagick is required for DDS portrait export. "
             "Install it from https://imagemagick.org/script/download.php"
         )
     logger.debug("Converting %s → %s (DXT5)", png.name, dds.name)
+    # TODO: capture ImageMagick stderr via subprocess.run(..., stderr=PIPE)
+    # and include it in the exception message when conversion fails.
     subprocess.run(
         ["magick", str(png), "-define", "dds:compression=dxt5", str(dds)],
         check=True,

@@ -53,6 +53,8 @@ class EventBuilderTab(QWidget):
 
         form_layout.addWidget(QLabel("Event Type"), 0, 0)
         self.event_type = QComboBox()
+        # TODO: add more event types beyond country_event and news_event
+        # (e.g. state_event, unit_leader_event, decisions).
         self.event_type.addItems(["country_event", "news_event"])
         self.event_type.setToolTip("Type of event")
         form_layout.addWidget(self.event_type, 0, 1)

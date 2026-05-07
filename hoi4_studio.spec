@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+# TODO: GitHub integration — one-click upload of mod to repo, one-click pull latest commit
 
 datas = [
     ("assets/logo.png", "assets"),

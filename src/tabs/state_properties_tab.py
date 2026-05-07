@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 
 class StatePropertiesTab(QWidget):
+    # TODO: no validation for owner TAG (3 letters), core TAGs, victory points
+    # (positive ints), or manpower (positive int). Invalid values written silently.
     def __init__(self, mw: "MainWindow"):
         super().__init__()
         self.mw = mw

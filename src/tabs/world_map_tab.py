@@ -278,6 +278,8 @@ def _load_water_texture(
             # TODO: ImageMagick subprocess has 30s timeout with no stderr logging —
             # if magick hangs (common with corrupt DDS) the map render blocks silently.
             # Also, use _have_magick() result to pick magick vs convert binary.
+            # TODO: FileNotFoundError from missing "magick" is caught by outer try/except
+            # before the convert fallback on line ~290 runs — use _magick_bin() helper.
             result = subprocess.run(
                 ["magick", "convert", str(dds_path), "-resize", f"{w}x{h}!", "bmp:-"],
                 capture_output=True,

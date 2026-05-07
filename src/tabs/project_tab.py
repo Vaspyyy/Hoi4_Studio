@@ -53,6 +53,9 @@ class ProjectTab(QWidget):
         )
         r2, self.user_mods, b2 = row(
             "User Mods",
+            # TODO: tooltip assumes English folder names. On older localized Windows
+            # the Documents folder path differs. Fine on Win10+ where Explorer uses
+            # shell display names but the on-disk path is still English.
             "Path to the Paradox user mods folder (Linux: ~/.local/share/Paradox Interactive/Hearts of Iron IV/mod, Windows: Documents\\Paradox Interactive\\Hearts of Iron IV\\mod)",
         )
         r3, self.mod_root, b3 = row("Mod Root", "Path to your mod's root directory")

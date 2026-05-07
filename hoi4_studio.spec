@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # TODO: GitHub integration — one-click upload of mod to repo, one-click pull latest commit
+# TODO: upx=True triggers AV false positives on Windows (PyInstaller bootloader + UPX
+# = heuristic flags). Consider upx=False for release builds to reduce user friction.
 
 datas = [
     ("assets/logo.png", "assets"),

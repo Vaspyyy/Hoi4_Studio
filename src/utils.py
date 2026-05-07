@@ -1,5 +1,9 @@
 """
 HOI4 Modding Studio - Utility Functions
+
+TODO: on Windows, file writes via pathlib write_text produce \r\n line endings.
+HOI4 tolerates this but for strictness consider newline="" in open() calls for
+mod .txt files (countries.py, states.py, focus.py, events.py, ideas.py).
 """
 
 from __future__ import annotations
@@ -52,6 +56,10 @@ def import_flag_to_mod(
 
 
 def _have_magick() -> bool:
+    # TODO: refactor into _magick_bin() -> str|None that returns the actual binary
+    # name. _have_magick() returns True when only convert exists, but
+    # import_portrait_to_mod hardcodes "magick", crashing on v6. Same bug in
+    # world_map_tab.py _load_water_texture where the convert fallback is shadowed.
     found = shutil.which("magick") is not None or shutil.which("convert") is not None
     if not found:
         logger.warning("ImageMagick not found on PATH")

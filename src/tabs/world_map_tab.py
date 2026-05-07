@@ -1369,19 +1369,19 @@ class WorldMapTab(QWidget):
     def _auto_detect_files(self) -> None:
         if not self.mw.paths or not self.mw.paths.mod_root:
             return
-        mod = self.mw.paths.mod_root
 
-        bmp = mod / "map" / "provinces.bmp"
-        if bmp.exists():
-            self._provinces_bmp_path = bmp
-        else:
-            png = mod / "map" / "provinces.png"
-            if png.exists():
-                self._provinces_bmp_path = png
-
-        csv_path = mod / "map" / "definition.csv"
-        if csv_path.exists():
-            self._definition_csv_path = csv_path
+        for base in [self.mw.paths.mod_root, self.mw.paths.hoi4_install]:
+            if base is None:
+                continue
+            if not self._provinces_bmp_path:
+                for cand in [base / "map" / "provinces.bmp", base / "map" / "provinces.png"]:
+                    if cand.exists():
+                        self._provinces_bmp_path = cand
+                        break
+            if not self._definition_csv_path:
+                csv_path = base / "map" / "definition.csv"
+                if csv_path.exists():
+                    self._definition_csv_path = csv_path
 
     def _show_missing_files_message(self) -> None:
         missing = []

@@ -58,12 +58,12 @@ class WelcomeTab(QWidget):
         # TODO: both buttons jump to tab index 1 (Project) without differentiation.
         # "New Mod" should open project tab with a "create if missing" flag or wizard.
         # "Open Project" should just navigate. Currently identical behavior is confusing.
-        btn_open = AnimatedButton("Open Project", accent_color="#818CF8")
+        btn_open = AnimatedButton("Open Project", accent_color="#c9a74d")
         btn_open.setToolTip("Load an existing mod project by setting paths")
         btn_open.clicked.connect(lambda: self.mw.tabs.setCurrentIndex(1))
         qs_row.addWidget(btn_open)
 
-        btn_new = AnimatedButton("New Mod", accent_color="#34D399")
+        btn_new = AnimatedButton("New Mod", accent_color="#6b8e4a")
         btn_new.setToolTip("Create a new mod folder structure")
         btn_new.clicked.connect(lambda: self.mw.tabs.setCurrentIndex(1))
         qs_row.addWidget(btn_new)

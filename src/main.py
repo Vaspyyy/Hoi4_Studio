@@ -182,7 +182,7 @@ class MainWindow(QMainWindow):
                 widget_or_factory, name = entry
                 factory = widget_or_factory
 
-            icon_color = TAB_ICONS.get(name, "#60A5FA")
+            icon_color = TAB_ICONS.get(name, "#b8963e")
             icon = make_icon(icon_color)
 
             if factory is None:
@@ -513,7 +513,7 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
             "Click <b>Send Bug Report</b> to open a GitHub issue with this report."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("font-size: 11px; padding: 4px 0; color: #8b949e;")
+        hint.setStyleSheet("font-size: 11px; padding: 4px 0; color: #7a7360;")
         layout.addWidget(hint)
 
         from .logging_setup import build_crash_report
@@ -522,7 +522,7 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
         report_text.setReadOnly(True)
         report_text.setPlainText(build_crash_report(error_msg))
         report_text.setStyleSheet(
-            "font-family: monospace; font-size: 10px; background: #0d1117; color: #c9d1d9;"
+            "font-family: monospace; font-size: 10px; background: #151310; color: #ddd6c8;"
         )
         layout.addWidget(report_text)
 
@@ -565,11 +565,11 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
         layout.addLayout(btn_row)
 
         dlg.setStyleSheet(
-            "QDialog { background: #161b22; color: #c9d1d9; }"
-            "QPushButton { background: #21262d; border: 1px solid #30363d; border-radius: 6px; "
-            "  padding: 6px 16px; color: #c9d1d9; }"
-            "QPushButton:hover { background: #30363d; }"
-            "QPushButton:disabled { color: #484f58; }"
+            "QDialog { background: #1c1a15; color: #ddd6c8; }"
+            "QPushButton { background: #2a2620; border: 1px solid #3d382e; border-radius: 3px; "
+            "  padding: 6px 16px; color: #ddd6c8; }"
+            "QPushButton:hover { background: #3d382e; }"
+            "QPushButton:disabled { color: #7a7360; }"
         )
         dlg.exec()
     except Exception:

@@ -112,7 +112,7 @@ class ColorSwatch(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setBrush(QBrush(QColor(self._r, self._g, self._b)))
-        painter.setPen(QPen(QColor("#475569"), 1))
+        painter.setPen(QPen(QColor("#3d382e"), 1))
         painter.drawRoundedRect(1, 1, self.width() - 2, self.height() - 2, 6, 6)
         painter.end()
 
@@ -145,7 +145,7 @@ class IdeologySlider(QWidget):
     ):
         super().__init__(parent)
         self._ideology = ideology
-        self._color = IDEOLOGY_COLORS.get(ideology, "#3B82F6")
+        self._color = IDEOLOGY_COLORS.get(ideology, "#b8963e")
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

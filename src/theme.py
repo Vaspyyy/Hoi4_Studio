@@ -232,8 +232,6 @@ QTabBar::tab {{
     background: {c.bg_secondary};
     color: {c.text_muted};
     border: 1px solid {c.border};
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
     padding: 6px 12px;
     margin-right: 2px;
     font-family: "Maple Mono", monospace;

@@ -152,8 +152,8 @@ QMainWindow {{
 }}
 QWidget#card {{
     background: {c.bg_card_start};
-    border: 1px solid {c.border};
-    border-radius: 4px;
+    border: none;
+    border-radius: 0px;
 }}
 QLabel {{
     color: {c.text_secondary};

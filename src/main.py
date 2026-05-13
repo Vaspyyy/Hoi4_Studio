@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QMainWindow,
     QPushButton,
@@ -49,7 +50,9 @@ from .theme import (
     make_icon,
     TAB_ICONS,
 )
+from .version import VERSION
 from .widgets import LogPanel
+from . import update_checker
 
 logger = logging.getLogger("hoi4_studio.main")
 
@@ -64,10 +67,16 @@ class _ScrollableTabWrapper(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         sa = QScrollArea()
+        sa.setFrameStyle(QFrame.NoFrame)
         sa.setWidgetResizable(True)
         sa.setWidget(inner)
         sa.setMinimumSize(0, 0)
         layout.addWidget(sa)
+        # Strip default platform margins from the tab's top-level layout.
+        # Otherwise every tab gets ~9-11px of unwanted inset on all sides.
+        inner_layout = inner.layout()
+        if inner_layout is not None:
+            inner_layout.setContentsMargins(0, 0, 0, 0)
         self._inner = inner
         self._scroll_area = sa
 
@@ -214,6 +223,7 @@ class MainWindow(QMainWindow):
         self._setup_menus()
         self._setup_autosave()
         self._apply_current_theme()
+        self._start_update_check()
         logger.info("MainWindow ready: %d tabs", self.tabs.count())
 
     def _setup_menus(self) -> None:
@@ -276,6 +286,10 @@ class MainWindow(QMainWindow):
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+        update_action = QAction("Check for &Updates", self)
+        update_action.setToolTip("Check GitHub for a newer release")
+        update_action.triggered.connect(self._start_update_check)
+        help_menu.addAction(update_action)
 
     def _setup_autosave(self) -> None:
         self._autosave_timer = QTimer(self)
@@ -362,17 +376,39 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(idx - 1)
 
     def _show_about(self) -> None:
-        # TODO: read version from pyproject.toml instead of hardcoding "v0.3".
-        # Use importlib.metadata.version("hoi4-modding-studio") or parse
-        # pyproject.toml at import time and store in a VERSION constant.
         QMessageBox.about(
             self,
             "About",
-            "HOI4 Modding Studio v0.3\n\n"
+            f"HOI4 Modding Studio v{VERSION}\n\n"
             "A workbench for Hearts of Iron 4 modders.\n"
             "No, you don't need to learn Paradox script.\n\n"
             "Built with PySide6 and Python.",
         )
+
+    def _start_update_check(self) -> None:
+        """Fire-and-forget GitHub release check in a background thread."""
+        self.status_message("Checking for updates…")
+        update_checker.start_update_check(self, self._on_update_result)
+
+    def _on_update_result(self, info) -> None:
+        """Called on the main thread when the update check completes."""
+        if info is None:
+            self.log_panel.log("No update available.", "info")
+            return
+        frozen = getattr(sys, "frozen", False)
+        if frozen:
+            msg = (
+                f"v{info.latest} is available! "
+                f"Download the latest .exe from the releases page."
+            )
+        else:
+            msg = (
+                f"v{info.latest} is available! "
+                f"Run  git pull  in the project directory."
+            )
+        self.status_message(msg)
+        self.log_panel.log(msg, "info")
+        logger.info("Update available: %s → %s (%s)", info.current, info.latest, info.url)
 
     def status_message(self, msg: str) -> None:
         self._status_label.setText(msg)

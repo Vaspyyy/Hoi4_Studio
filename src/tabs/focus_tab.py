@@ -64,13 +64,13 @@ class FocusNodeItem(QGraphicsRectItem):
         title = QGraphicsTextItem(focus_id, self)
         title.setDefaultTextColor(QColor(colors.text_primary))
         title.setPos(10, 5)
-        title.setFont(QFont("Maple Mono", 10, QFont.Weight.Bold))
+        title.setFont(QFont("Maple Mono", 11, QFont.Weight.Bold))
 
         desc_text = tab.nodes.get(focus_id, {}).get("description", "No description")
         desc = QGraphicsTextItem(desc_text, self)
         desc.setDefaultTextColor(QColor(colors.text_muted))
         desc.setPos(10, 25)
-        desc.setFont(QFont("Maple Mono", 8))
+        desc.setFont(QFont("Maple Mono", 9))
         desc.setTextWidth(200)
 
     def center(self) -> QPointF:

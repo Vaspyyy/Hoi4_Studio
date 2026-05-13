@@ -160,7 +160,7 @@ QLabel {{
     font-family: "Maple Mono", monospace;
 }}
 QLabel#section-title {{
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
     color: {c.accent};
     padding: 2px 0;
@@ -168,13 +168,13 @@ QLabel#section-title {{
     margin-bottom: 4px;
 }}
 QLabel#section-subtitle {{
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 400;
     color: {c.text_muted};
     padding: 0;
 }}
 QLabel#hero-title {{
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 800;
     color: {c.text_primary};
     padding: 4px 0;
@@ -235,7 +235,7 @@ QTabBar::tab {{
     padding: 6px 12px;
     margin-right: 2px;
     font-family: "Maple Mono", monospace;
-    font-size: 11px;
+    font-size: 12px;
 }}
 QTabBar::tab:selected {{
     background: {c.bg_hover};
@@ -426,7 +426,7 @@ QStatusBar {{
     border-top: 1px solid {c.border};
     padding: 3px 10px;
     font-family: "Maple Mono", monospace;
-    font-size: 11px;
+    font-size: 12px;
 }}
 QStatusBar QLabel {{
     color: {c.text_muted};
@@ -439,7 +439,7 @@ QToolTip {{
     padding: 4px 8px;
     border-radius: 3px;
     font-family: "Maple Mono", monospace;
-    font-size: 11px;
+    font-size: 12px;
 }}
 QMenuBar {{
     background: {c.bg_secondary};
@@ -499,9 +499,9 @@ class AnimatedButton(QPushButton):
                 color: {tc};
                 border: none;
                 border-radius: 3px;
-                padding: 6px 14px;
+                padding: 7px 16px;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 13px;
                 font-family: "Maple Mono", monospace;
             }}
             QPushButton:disabled {{

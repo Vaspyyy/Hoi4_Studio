@@ -350,6 +350,9 @@ class CountryTab(QWidget):
         layout.addWidget(btn)
 
         outer.addWidget(card)
+
+        # Auto-refresh tag data when paths change
+        self.mw.tags_changed.connect(self.reload_tags)
         self.tag_picker.currentTextChanged.connect(self._on_tag_picker_changed)
         self.reload_tags()
 

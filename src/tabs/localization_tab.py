@@ -76,6 +76,9 @@ class LocalizationManagerTab(QWidget):
         layout.addLayout(button_row)
 
         outer.addWidget(card)
+
+        # Auto-refresh when paths/tags change
+        self.mw.tags_changed.connect(self.refresh_localization_entries)
         self.search.textChanged.connect(self.refresh_list)
 
     def refresh_localization_entries(self):

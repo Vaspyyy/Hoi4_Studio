@@ -6,6 +6,8 @@ Drop-in replacement for QTabWidget with animated slide transitions.
 
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import QPropertyAnimation, QEasingCurve, Signal, QRect
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTabBar, QSizePolicy
 
@@ -46,10 +48,15 @@ class SlidingTabWidget(QWidget):
         self._animating = False
         self._anim_old = None
         self._anim_new = None
+        self._factories: dict[int, Callable[[], QWidget]] = {}
 
         self._tab_bar.currentChanged.connect(self._on_tab_bar_changed)
 
-    def addTab(self, widget, arg1, arg2=None):
+    def addTab(self, widget, arg1, arg2=None, factory: Callable[[], QWidget] | None = None):
+        """Add a tab. If factory is provided, the tab is lazy — the real widget
+        is only created when the user first clicks the tab. This cuts startup
+        cost by deferring heavy widget construction (graphics scenes, etc.).
+        """
         if arg2 is None:
             text = arg1
             idx = self._tab_bar.addTab(text)
@@ -61,7 +68,10 @@ class SlidingTabWidget(QWidget):
         widget.setParent(self._container)
         self._pages.append(widget)
 
-        if self._current_index < 0:
+        if factory is not None:
+            self._factories[idx] = factory
+            widget.hide()
+        elif self._current_index < 0:
             self._current_index = 0
             widget.setGeometry(self._container.rect())
             widget.show()
@@ -89,8 +99,22 @@ class SlidingTabWidget(QWidget):
             self._pages[self._current_index].setGeometry(self._container.rect())
             self._pages[self._current_index].show()
             self._animating = False
+        self._ensure_loaded(new_idx)
         if new_idx != self._current_index:
             self._animate_slide(self._current_index, new_idx)
+
+    def _ensure_loaded(self, idx: int) -> None:
+        """If tab idx is lazy (has a factory), create the real widget and swap it in."""
+        if idx not in self._factories:
+            return
+        factory = self._factories.pop(idx)
+        placeholder = self._pages[idx]
+        placeholder.hide()
+        real = factory()
+        real.setParent(self._container)
+        real.hide()
+        self._pages[idx] = real
+        placeholder.deleteLater()
 
     def _animate_slide(self, old_idx, new_idx):
         self._animating = True

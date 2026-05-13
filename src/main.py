@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 from PySide6.QtCore import QTimer, Signal, QEvent, QObject
 from PySide6.QtGui import QAction, QIcon, QKeySequence
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from .sliding_tab import SlidingTabWidget
@@ -50,24 +51,39 @@ from .theme import (
 )
 from .widgets import LogPanel
 
-from .tabs.welcome_tab import WelcomeTab
-from .tabs.project_tab import ProjectTab
-from .tabs.country_tab import CountryTab
-from .tabs.states_tab import StatesTab
-from .tabs.state_properties_tab import StatePropertiesTab
-from .tabs.world_map_tab import WorldMapTab
-from .tabs.event_builder_tab import EventBuilderTab
-from .tabs.focus_tab import FocusTab
-from .tabs.ideas_tab import IdeasTab
-from .tabs.localization_tab import LocalizationManagerTab
-from .tabs.map_generator_tab import MapGeneratorTab
-
 logger = logging.getLogger("hoi4_studio.main")
+
+
+class _ScrollableTabWrapper(QWidget):
+    """Wraps a tab widget in a QScrollArea so it can scroll when the window
+    is too small. Every content tab goes through this wrapper for consistency.
+    """
+
+    def __init__(self, inner: QWidget, parent: QWidget | None = None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setWidget(inner)
+        sa.setMinimumSize(0, 0)
+        layout.addWidget(sa)
+        self._inner = inner
+        self._scroll_area = sa
+
+    def inner_widget(self) -> QWidget:
+        return self._inner
 
 
 class MainWindow(QMainWindow):
     paths_changed = Signal()
     tags_changed = Signal()
+
+    # (display name, factory callable, icon color key)
+    # Eager tabs are built immediately; lazy tabs (factory != None) are
+    # created on first click, which avoids burning memory on tabs the
+    # user may never visit.
+    TAB_REGISTRY: list[tuple[str, Callable[..., QWidget] | None, str]] = []
 
     def __init__(self):
         super().__init__()
@@ -95,43 +111,97 @@ class MainWindow(QMainWindow):
 
         self.log_panel = LogPanel(theme=get_colors(self.settings.theme))
 
-        def _scroll_tab(widget):
-            sa = QScrollArea()
-            sa.setWidgetResizable(True)
-            sa.setWidget(widget)
-            sa.setMinimumSize(0, 0)
-            return sa
+        # Eager tabs — always needed at startup
+        from .tabs.welcome_tab import WelcomeTab
+        from .tabs.project_tab import ProjectTab
 
         self.welcome = WelcomeTab(self)
         self.project = ProjectTab(self)
-        self.country = CountryTab(self)
-        self.states = StatesTab(self)
-        self.state_props = StatePropertiesTab(self)
-        self.browser = WorldMapTab(self)
-        self.events = EventBuilderTab(self)
-        self.focus = FocusTab(self)
-        self.ideas = IdeasTab(self)
-        self.loc_manager = LocalizationManagerTab(self)
-        self.map_gen = MapGeneratorTab(self)
 
+        # Lazy tab factories — only created on first visit
+        def _make_country():
+            from .tabs.country_tab import CountryTab
+            return CountryTab(self)
+
+        def _make_states():
+            from .tabs.states_tab import StatesTab
+            return StatesTab(self)
+
+        def _make_state_props():
+            from .tabs.state_properties_tab import StatePropertiesTab
+            return StatePropertiesTab(self)
+
+        def _make_world_map():
+            from .tabs.world_map_tab import WorldMapTab
+            return WorldMapTab(self)
+
+        def _make_events():
+            from .tabs.event_builder_tab import EventBuilderTab
+            return EventBuilderTab(self)
+
+        def _make_focus():
+            from .tabs.focus_tab import FocusTab
+            return FocusTab(self)
+
+        def _make_ideas():
+            from .tabs.ideas_tab import IdeasTab
+            return IdeasTab(self)
+
+        def _make_localization():
+            from .tabs.localization_tab import LocalizationManagerTab
+            return LocalizationManagerTab(self)
+
+        def _make_map_gen():
+            from .tabs.map_generator_tab import MapGeneratorTab
+            return MapGeneratorTab(self)
+
+        # Registry: (display_name, optional_factory, icon_color_key)
+        # factory=None means eager (already built); factory=callable means lazy.
         tab_defs = [
-            (self.welcome, "Welcome"),
-            (self.project, "Project"),
-            (_scroll_tab(self.country), "Country Builder"),
-            (self.states, "States (IDs)"),
-            (_scroll_tab(self.state_props), "State Properties"),
-            (self.browser, "World Map"),
-            (_scroll_tab(self.events), "Event Builder"),
-            (self.focus, "Focus Tree Editor"),
-            (_scroll_tab(self.ideas), "Ideas/National Spirit"),
-            (self.loc_manager, "Localization Manager"),
-            (_scroll_tab(self.map_gen), "Map Generator"),
+            (self.welcome,            None,              "Welcome"),
+            (self.project,            None,              "Project"),
+            (_make_country,           "Country Builder"),
+            (_make_states,            "States (IDs)"),
+            (_make_state_props,       "State Properties"),
+            (_make_world_map,         "World Map"),
+            (_make_events,            "Event Builder"),
+            (_make_focus,             "Focus Tree Editor"),
+            (_make_ideas,             "Ideas/National Spirit"),
+            (_make_localization,      "Localization Manager"),
+            (_make_map_gen,           "Map Generator"),
         ]
 
-        for widget, name in tab_defs:
+        # Store tab references and factories for signal connections
+        self._tab_refs: dict[str, QWidget | None] = {}
+        self._tab_factories: dict[str, Callable[[], QWidget]] = {}
+
+        for entry in tab_defs:
+            if len(entry) == 3:
+                widget_or_factory, factory, name = entry
+            else:
+                widget_or_factory, name = entry
+                factory = widget_or_factory
+
             icon_color = TAB_ICONS.get(name, "#60A5FA")
             icon = make_icon(icon_color)
-            tabs.addTab(widget, icon, name)
+
+            if factory is None:
+                # Eager: wrap in scroll wrapper and add directly
+                wrapper = _ScrollableTabWrapper(widget_or_factory)
+                tabs.addTab(wrapper, icon, name)
+                self._tab_refs[name] = widget_or_factory
+            else:
+                # Lazy: placeholder wrapped in scroll area; factory creates
+                # the real widget on first visit. The SlidingTabWidget calls
+                # the factory, then we re-wrap the result in a scroll area.
+                def _lazy_factory(fn=factory, tab_name=name):
+                    widget = fn()
+                    self._tab_refs[tab_name] = widget
+                    return _ScrollableTabWrapper(widget)
+
+                placeholder = QWidget()
+                placeholder.setMinimumSize(0, 0)
+                tabs.addTab(placeholder, icon, name, factory=_lazy_factory)
 
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
@@ -145,7 +215,10 @@ class MainWindow(QMainWindow):
         logger.info("MainWindow ready: %d tabs", self.tabs.count())
 
     def _setup_menus(self) -> None:
-        # TODO: add Ctrl+1..Ctrl+9 shortcuts to jump to specific tabs.
+        # TODO: Ctrl+1..Ctrl+9 shortcuts to jump to specific tabs.
+        # Register them dynamically from TAB_REGISTRY so new tabs get
+        # shortcuts automatically. Bind Ctrl+1→Welcome, Ctrl+2→Project, etc.
+        # Also add Alt+Left/Right as alternatives to Ctrl+Tab.
         menubar = self.menuBar()
 
         file_menu = menubar.addMenu("&File")
@@ -227,15 +300,15 @@ class MainWindow(QMainWindow):
 
     def _undo(self) -> None:
         current = self.tabs.currentWidget()
-        if isinstance(current, QScrollArea):
-            current = current.widget()
+        if isinstance(current, _ScrollableTabWrapper):
+            current = current.inner_widget()
         if hasattr(current, "undo_stack") and current.undo_stack:
             current.undo_stack.undo()
 
     def _redo(self) -> None:
         current = self.tabs.currentWidget()
-        if isinstance(current, QScrollArea):
-            current = current.widget()
+        if isinstance(current, _ScrollableTabWrapper):
+            current = current.inner_widget()
         if hasattr(current, "undo_stack") and current.undo_stack:
             current.undo_stack.redo()
 
@@ -259,11 +332,13 @@ class MainWindow(QMainWindow):
 
     def _propagate_theme_to_buttons(self, colors) -> None:
         # TODO: full widget tree recursion on every theme switch causes lag
-        # on 10+ tabs — use a signal-based approach instead.
+        # on 10+ tabs — use a signal-based approach instead. Each tab should
+        # connect to a theme_changed signal and update itself independently.
         for i in range(self.tabs.count()):
             widget = self.tabs.widget(i)
-            inner = widget.widget() if isinstance(widget, QScrollArea) else widget
-            self._apply_theme_recursive(inner, colors)
+            inner = widget.inner_widget() if isinstance(widget, _ScrollableTabWrapper) else widget
+            if inner is not None:
+                self._apply_theme_recursive(inner, colors)
 
     def _apply_theme_recursive(self, widget, colors) -> None:
         from .theme import AnimatedButton
@@ -286,6 +361,8 @@ class MainWindow(QMainWindow):
 
     def _show_about(self) -> None:
         # TODO: read version from pyproject.toml instead of hardcoding "v0.3".
+        # Use importlib.metadata.version("hoi4-modding-studio") or parse
+        # pyproject.toml at import time and store in a VERSION constant.
         QMessageBox.about(
             self,
             "About HOI4 Modding Studio",
@@ -301,14 +378,10 @@ class MainWindow(QMainWindow):
         self._changes.append(description)
 
     def refresh_all_tag_dropdowns(self):
-        self.country.reload_tags()
-        self.states.reload_tags()
-        self.browser.reload_tags()
-        self.focus.reload_tags()
-        self.ideas.reload_tags()
+        """Emit tags_changed so every tab that cares can refresh itself.
+        Tabs connect to this signal in their __init__ — no hardcoded list.
+        """
         self.tags_changed.emit()
-        if hasattr(self, "loc_manager"):
-            self.loc_manager.refresh_localization_entries()
 
     def closeEvent(self, event) -> None:
         if self._changes:
@@ -402,6 +475,9 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
 
     # TODO: ISSUES_URL should be read from pyproject.toml or a config constant,
     # not hardcoded here.
+    # TODO: the crash dialog creates a new QApplication if one doesn't exist
+    # (line app = QApplication([])). This is fragile — if there's truly no app,
+    # we can't show a Qt dialog at all. Fall back to printing to stderr.
     ISSUES_URL = "https://github.com/Vaspyyy/Hoi4_Studio/issues/new?template=bug_report.yml"
 
     try:

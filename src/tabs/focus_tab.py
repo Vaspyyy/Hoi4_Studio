@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QSlider,
 )
 
-from ..theme import AnimatedButton, create_card_widget, create_section_title
+from ..theme import AnimatedButton, create_card_widget, create_section_title, get_colors, ThemeColors
 from ..focus import load_focus_tree_file, export_focus_tree, export_focus_localisation
 from ..effects_catalog import ALL_EFFECTS
 from ..commands import GenericCommand
@@ -43,11 +43,12 @@ from PySide6.QtGui import QUndoStack
 
 
 class FocusNodeItem(QGraphicsRectItem):
-    def __init__(self, tab: "FocusTab", focus_id: str, name: str, x: int, y: int):
+    def __init__(self, tab: "FocusTab", focus_id: str, name: str, x: int, y: int, colors: ThemeColors):
         super().__init__(0, 0, 220, 80)
         self.tab = tab
         self.focus_id = focus_id
         self._drag_target: Optional[str] = None
+        self._colors = colors
 
         self.setPos(x * 40, y * 40)
         self.setFlags(
@@ -56,18 +57,18 @@ class FocusNodeItem(QGraphicsRectItem):
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
 
-        self.setBrush(QBrush(QColor("#1E293B")))
-        self.setPen(QPen(QColor("#475569"), 2))
+        self.setBrush(QBrush(QColor(colors.bg_card_start)))
+        self.setPen(QPen(QColor(colors.border_hover), 2))
         self.setAcceptHoverEvents(True)
 
         title = QGraphicsTextItem(focus_id, self)
-        title.setDefaultTextColor(QColor("#E2E8F0"))
+        title.setDefaultTextColor(QColor(colors.text_primary))
         title.setPos(10, 5)
         title.setFont(QFont("Arial", 10, QFont.Weight.Bold))
 
         desc_text = tab.nodes.get(focus_id, {}).get("description", "No description")
         desc = QGraphicsTextItem(desc_text, self)
-        desc.setDefaultTextColor(QColor("#94A3B8"))
+        desc.setDefaultTextColor(QColor(colors.text_muted))
         desc.setPos(10, 25)
         desc.setFont(QFont("Arial", 8))
         desc.setTextWidth(200)
@@ -101,23 +102,24 @@ class FocusNodeItem(QGraphicsRectItem):
         super().mouseReleaseEvent(event)
 
     def hoverEnterEvent(self, event):
-        self.setBrush(QBrush(QColor("#334155")))
-        self.setPen(QPen(QColor("#60A5FA"), 3))
+        self.setBrush(QBrush(QColor(self._colors.accent)))
+        self.setPen(QPen(QColor(self._colors.border_focus), 3))
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        self.setBrush(QBrush(QColor("#1E293B")))
-        self.setPen(QPen(QColor("#475569"), 2))
+        self.setBrush(QBrush(QColor(self._colors.bg_card_start)))
+        self.setPen(QPen(QColor(self._colors.border_hover), 2))
         super().hoverLeaveEvent(event)
 
 
 class FocusLinkItem(QGraphicsItem):
     # TODO: duplicated in world_map_tab.py and states.py; consolidate shared
     # regex patterns into a src/patterns.py module.
-    def __init__(self, a: FocusNodeItem, b: FocusNodeItem):
+    def __init__(self, a: FocusNodeItem, b: FocusNodeItem, colors: ThemeColors):
         super().__init__()
         self.a = a
         self.b = b
+        self._colors = colors
         self.setZValue(-10)
 
     def boundingRect(self) -> QRectF:
@@ -128,16 +130,17 @@ class FocusLinkItem(QGraphicsItem):
     def paint(self, painter, option, widget=None):
         pa = self.a.center()
         pb = self.b.center()
-        painter.setPen(QPen(QColor("#475569"), 3))
+        painter.setPen(QPen(QColor(self._colors.border_hover), 3))
         painter.drawLine(pa, pb)
 
 
 class MinimapView(QWidget):
     # TODO: self._scale = 0.08 is set but never used — paint recomputes scale
     # from scene rect. Remove dead field or use as configurable base scale.
-    def __init__(self, scene: QGraphicsScene, parent=None):
+    def __init__(self, scene: QGraphicsScene, colors: ThemeColors, parent=None):
         super().__init__(parent)
         self.scene = scene
+        self._colors = colors
         self._scale = 0.08
         self.setFixedSize(200, 120)
         self.setToolTip("Minimap - click to navigate")
@@ -145,8 +148,8 @@ class MinimapView(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#0B1220"))
-        painter.setPen(QPen(QColor("#1E293B"), 1))
+        painter.fillRect(self.rect(), QColor(self._colors.bg_input))
+        painter.setPen(QPen(QColor(self._colors.border), 1))
         painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
 
         scene_rect = self.scene.sceneRect()
@@ -169,7 +172,7 @@ class MinimapView(QWidget):
                 sy = pos.y() * scale + oy
                 sw = r.width() * scale
                 sh = r.height() * scale
-                painter.setBrush(QBrush(QColor("#3B82F6")))
+                painter.setBrush(QBrush(QColor(self._colors.accent)))
                 painter.drawRoundedRect(int(sx), int(sy), max(int(sw), 2), max(int(sh), 2), 2, 2)
 
         painter.end()
@@ -187,6 +190,7 @@ class FocusTab(QWidget):
         self.links: list[tuple[str, str]] = []
         self._drag_source: Optional[str] = None
         self.undo_stack = QUndoStack(self)
+        self._colors = get_colors(mw.settings.theme)
 
         outer = QVBoxLayout(self)
         card, card_layout = create_card_widget(self)
@@ -318,7 +322,7 @@ class FocusTab(QWidget):
         self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.view.wheelEvent = self._wheel_zoom
 
-        self.minimap = MinimapView(self.scene)
+        self.minimap = MinimapView(self.scene, self._colors)
         self.minimap.setFixedWidth(200)
 
         canvas_row.addWidget(self.view, stretch=1)
@@ -344,6 +348,9 @@ class FocusTab(QWidget):
 
         self._current_focus_id: Optional[str] = None
         self.reload_tags()
+
+        # Connect to tags_changed so this tab auto-refreshes when paths change
+        self.mw.tags_changed.connect(self.reload_tags)
 
     def reload_tags(self):
         if self.mw.paths:
@@ -387,7 +394,7 @@ class FocusTab(QWidget):
             "prereq": prereqs,
         }
 
-        item = FocusNodeItem(self, fid, n["name"], 0, 0)
+        item = FocusNodeItem(self, fid, n["name"], 0, 0, self._colors)
         new_links = []
         if pre and pre in self.items:
             new_links = [(pre, fid)]
@@ -488,7 +495,7 @@ class FocusTab(QWidget):
                 self.scene.removeItem(item)
         for a, b in self.links:
             if a in self.items and b in self.items:
-                self.scene.addItem(FocusLinkItem(self.items[a], self.items[b]))
+                self.scene.addItem(FocusLinkItem(self.items[a], self.items[b], self._colors))
         self.minimap.refresh()
 
     def load_mod(self):
@@ -508,7 +515,7 @@ class FocusTab(QWidget):
         for n in nodes:
             self.nodes[n["id"]] = n
             self.list.addItem(QListWidgetItem(n["id"]))
-            item = FocusNodeItem(self, n["id"], n["name"], n.get("x", 0), n.get("y", 0))
+            item = FocusNodeItem(self, n["id"], n["name"], n.get("x", 0), n.get("y", 0), self._colors)
             self.scene.addItem(item)
             self.items[n["id"]] = item
         for n in nodes:
@@ -567,6 +574,7 @@ class FocusTab(QWidget):
                 saved_node["name"],
                 saved_node.get("x", 0),
                 saved_node.get("y", 0),
+                self._colors,
             )
             self.scene.addItem(item)
             self.items[fid] = item
@@ -600,14 +608,14 @@ class FocusTab(QWidget):
 
         if self._link_source is None:
             self._link_source = fid
-            clicked_item.setPen(QPen(QColor("#3B82F6"), 3))
+            clicked_item.setPen(QPen(QColor(self._colors.accent), 3))
             return
 
         source = self._link_source
         target = fid
 
         if source in self.items:
-            self.items[source].setPen(QPen(QColor("#475569"), 2))
+            self.items[source].setPen(QPen(QColor(self._colors.border_hover), 2))
 
         self._link_source = None
 

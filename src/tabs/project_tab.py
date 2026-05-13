@@ -232,6 +232,11 @@ class ProjectTab(QWidget):
         self.apply_paths(create_if_missing=False)
 
     def nuke(self):
+        # TODO: replace file-dialog-as-confirmation with a proper "type DELETE
+        # to confirm" dialog (QInputDialog or custom dialog with a QLineEdit).
+        # Opening a QFileDialog.getSaveFileName and checking the filename for
+        # "DELETE" is a confusing UX pattern — users expect a file dialog to
+        # save files, not confirm destructive actions.
         if not self.mw.paths:
             QMessageBox.critical(self, "Error", "Load project first")
             return

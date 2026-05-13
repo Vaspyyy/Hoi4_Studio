@@ -120,6 +120,9 @@ class StatesTab(QWidget):
         layout.addWidget(self.log_output, stretch=1)
 
         outer.addWidget(card)
+
+        # Auto-refresh tag data when paths change
+        self.mw.tags_changed.connect(self.reload_tags)
         self.reload_tags()
 
     def reload_tags(self):

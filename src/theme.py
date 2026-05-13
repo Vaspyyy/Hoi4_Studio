@@ -719,8 +719,9 @@ def get_colors(theme_name: str) -> ThemeColors:
 
 def create_section_title(text: str, parent: Optional[QWidget] = None) -> QWidget:
     # TODO: hardcoded glow colors should use ThemeColors.glow_color to adapt to theme.
+    # Currently always uses "#3B82F6" regardless of dark/light, making glow invisible
+    # on light backgrounds. Accept a ThemeColors parameter or use get_colors().
     glow = GlowLabel(text, "#3B82F6" if not parent else "#3B82F6")
-    glow.setObjectName("section-title")
     glow.start_glow()
     return glow
 

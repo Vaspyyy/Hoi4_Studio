@@ -705,7 +705,7 @@ class LabelComputeWorker(QThread):
 
 
 class _CountryLabelItem(QGraphicsItem):
-    def __init__(self, name: str, spine: list[tuple[float, float]], font_size: float):
+    def __init__(self, name: str, spine: list[tuple[float, float]], font_size: float, is_dark: bool = True):
         super().__init__()
         self._name = name
         self._spine = spine
@@ -713,6 +713,7 @@ class _CountryLabelItem(QGraphicsItem):
         self._font = QFont("Sans Serif", self._font_size, QFont.Weight.Bold)
         self._layout: list[tuple[str, float, float, float]] = []
         self._brect = QRectF()
+        self._is_dark = is_dark
         self._precompute()
 
     def _precompute(self) -> None:
@@ -774,16 +775,22 @@ class _CountryLabelItem(QGraphicsItem):
     def paint(self, painter: QPainter, option, widget) -> None:
         painter.setFont(self._font)
         fm = painter.fontMetrics()
+        if self._is_dark:
+            outline_color = QColor(0, 0, 0, 200)
+            text_color = QColor(255, 255, 255, 230)
+        else:
+            outline_color = QColor(255, 255, 255, 200)
+            text_color = QColor(0, 0, 0, 230)
         for ch, x, y, ang in self._layout:
             painter.save()
             painter.translate(x, y)
             painter.rotate(math.degrees(ang))
             dx = -fm.horizontalAdvance(ch) / 2
             dy = fm.ascent() / 3
-            painter.setPen(QPen(QColor(0, 0, 0, 200), 2))
+            painter.setPen(QPen(outline_color, 2))
             for ox, oy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]:
                 painter.drawText(QPointF(dx + ox, dy + oy), ch)
-            painter.setPen(QPen(QColor(255, 255, 255, 230)))
+            painter.setPen(QPen(text_color))
             painter.drawText(QPointF(dx, dy), ch)
             painter.restore()
 
@@ -792,8 +799,9 @@ class MapGraphicsView(QGraphicsView):
     open_state_properties = Signal(int)
     toggle_mass_transfer_state = Signal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, is_dark: bool = True, parent=None):
         super().__init__(parent)
+        self._is_dark = is_dark
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self._pixmap_item: Optional[QGraphicsPixmapItem] = None
@@ -909,7 +917,7 @@ class MapGraphicsView(QGraphicsView):
             fs = self._fit_font_size(name, region_w)
             if fs < 3:
                 continue
-            item = _CountryLabelItem(name, spine, fs)
+            item = _CountryLabelItem(name, spine, fs, self._is_dark)
             self._scene.addItem(item)
             self._label_items.append(item)
 
@@ -1235,8 +1243,13 @@ class CountryLegendWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(8, 8, 8, 8)
-        self._layout.setSpacing(4)
+        self._layout.setContentsMargins(4, 4, 4, 4)
+        self._layout.setSpacing(2)
+        # TODO: hardcoded "dark" theme assumption — pass a is_dark flag or
+        # ThemeColors from WorldMapTab so swatch borders adapt to theme.
+        self._label_stylesheet = "font-weight: 700; font-size: 13px; padding: 4px 0;"
+        self._name_stylesheet = "font-size: 12px;"
+        self._border_color = "#555"
         self._layout.addStretch()
 
     def update_legend(
@@ -1249,7 +1262,7 @@ class CountryLegendWidget(QWidget):
                 w.deleteLater()
 
         header = QLabel(f"Countries ({len(detected_tags)})")
-        header.setStyleSheet("font-weight: 700; font-size: 13px; padding: 4px 0;")
+        header.setStyleSheet(self._label_stylesheet)
         self._layout.insertWidget(0, header)
 
         sorted_tags = sorted(detected_tags)
@@ -1263,11 +1276,11 @@ class CountryLegendWidget(QWidget):
             r, g, b = country_colors.get(tag, (128, 128, 128))
             swatch.setFixedSize(20, 14)
             swatch.setStyleSheet(
-                f"background-color: rgb({r},{g},{b}); border: 1px solid #555; border-radius: 3px;"
+                f"background-color: rgb({r},{g},{b}); border: 1px solid {self._border_color}; border-radius: 3px;"
             )
 
             name = QLabel(tag)
-            name.setStyleSheet("font-size: 12px;")
+            name.setStyleSheet(self._name_stylesheet)
             hl.addWidget(swatch)
             hl.addWidget(name)
             hl.addStretch()
@@ -1290,7 +1303,10 @@ class WorldMapTab(QWidget):
         self._fake_progress = 0
         self._fake_timer.timeout.connect(self._tick_fake_progress)
 
-        self.map_view = MapGraphicsView()
+        from ..theme import get_colors, ThemeColors
+
+        self._colors = get_colors(mw.settings.theme)
+        self.map_view = MapGraphicsView(is_dark=(mw.settings.theme == "dark"))
         self.map_view.setMinimumHeight(300)
         self.map_view.open_state_properties.connect(self._on_open_state_properties)
         self.map_view.toggle_mass_transfer_state.connect(self._on_toggle_mass_transfer)
@@ -1361,6 +1377,9 @@ class WorldMapTab(QWidget):
         layout.addWidget(self.status_label)
 
         outer.addWidget(card)
+
+        # Auto-refresh tag data when paths change
+        self.mw.tags_changed.connect(self.reload_tags)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

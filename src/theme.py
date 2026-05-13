@@ -226,13 +226,12 @@ QTabWidget::pane {{
     padding: 4px;
 }}
 QTabBar {{
-    margin-bottom: 2px;
+    margin-bottom: 0px;
 }}
 QTabBar::tab {{
     background: {c.bg_secondary};
     color: {c.text_muted};
     border: 1px solid {c.border};
-    border-bottom: none;
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
     padding: 6px 12px;

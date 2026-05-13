@@ -361,7 +361,7 @@ QListWidget::item:alternate {{
 }}
 QScrollBar:vertical {{
     background: {c.scroll_bg};
-    width: 8px;
+    width: 0px;
     margin: 0;
 }}
 QScrollBar::handle:vertical {{
@@ -678,7 +678,7 @@ def create_card_widget(parent: Optional[QWidget] = None) -> tuple[QWidget, QVBox
     card = QWidget(parent)
     card.setObjectName("card")
     layout = QVBoxLayout(card)
-    layout.setContentsMargins(20, 20, 20, 20)
+    layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(14)
     return card, layout
 

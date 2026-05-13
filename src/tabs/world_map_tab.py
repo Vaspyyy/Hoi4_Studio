@@ -1372,7 +1372,7 @@ class WorldMapTab(QWidget):
 
         layout.addWidget(splitter, stretch=1)
 
-        self.status_label = QLabel("No map rendered")
+        self.status_label = QLabel("No province map loaded. Hit Browse or load a mod.")
         self.status_label.setStyleSheet("font-size: 12px; padding: 4px 0;")
         layout.addWidget(self.status_label)
 
@@ -1389,7 +1389,7 @@ class WorldMapTab(QWidget):
 
     def _try_auto_render(self) -> None:
         if not self.mw.paths or not self.mw.paths.mod_root:
-            self.status_label.setText("Load a project first (set mod root in Project tab)")
+            self.status_label.setText("Load a mod first. Head over to the Project tab.")
             return
         self._auto_detect_files()
         if self._provinces_bmp_path and self._definition_csv_path:

@@ -552,7 +552,7 @@ class CountryTab(QWidget):
 
     def generate(self):
         if not self.mw.paths:
-            QMessageBox.critical(self, "Error", "Load project first")
+            QMessageBox.critical(self, "Error", "Load a mod first.")
             return
 
         tag = self.tag.text().strip().upper()
@@ -640,8 +640,8 @@ class CountryTab(QWidget):
                 vanilla_override=is_vanilla,
             )
 
-            self.mw.log_panel.log(f"Country {tag} generated successfully.", "success")
-            self.mw.status_message(f"Country {tag} updated")
+            self.mw.log_panel.log(f"Nation {tag} written to disk.", "success")
+            self.mw.status_message(f"Nation {tag} written")
             self.mw.refresh_all_tag_dropdowns()
         except Exception as e:
             self.mw.log_panel.log(str(e), "error")

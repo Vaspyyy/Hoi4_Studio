@@ -341,7 +341,7 @@ class IdeasTab(QWidget):
 
     def generate(self):
         if not self.mw.paths:
-            QMessageBox.critical(self, "Error", "Load project first")
+            QMessageBox.critical(self, "Error", "Load a mod first.")
             return
         tag = self.tag_picker.current_tag()
         if not tag or tag == "(NONE)":

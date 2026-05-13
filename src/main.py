@@ -157,17 +157,19 @@ class MainWindow(QMainWindow):
 
         # Registry: (display_name, optional_factory, icon_color_key)
         # factory=None means eager (already built); factory=callable means lazy.
+        # Order follows the natural modding workflow: set up, build nations,
+        # design focus trees, write events, localise, then tweak states and map.
         tab_defs = [
             (self.welcome,            None,              "Welcome"),
             (self.project,            None,              "Project"),
-            (_make_country,           "Country Builder"),
-            (_make_states,            "States (IDs)"),
+            (_make_country,           "Nation Designer"),
+            (_make_focus,             "Focus Trees"),
+            (_make_ideas,             "National Spirits"),
+            (_make_events,            "Event Chains"),
+            (_make_localization,      "Localisation"),
+            (_make_states,            "State Browser"),
             (_make_state_props,       "State Properties"),
-            (_make_world_map,         "World Map"),
-            (_make_events,            "Event Builder"),
-            (_make_focus,             "Focus Tree Editor"),
-            (_make_ideas,             "Ideas/National Spirit"),
-            (_make_localization,      "Localization Manager"),
+            (_make_world_map,         "Province Map"),
             (_make_map_gen,           "Map Generator"),
         ]
 
@@ -205,7 +207,7 @@ class MainWindow(QMainWindow):
 
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
-        self._status_label = QLabel("Ready")
+        self._status_label = QLabel("")
         status_bar.addWidget(self._status_label)
         status_bar.addPermanentWidget(self.log_panel)
 
@@ -225,7 +227,7 @@ class MainWindow(QMainWindow):
 
         save_action = QAction("&Save", self)
         save_action.setShortcut(QKeySequence("Ctrl+S"))
-        save_action.setToolTip("Save current project state")
+        save_action.setToolTip("Write all changes to mod files")
         save_action.triggered.connect(self._quick_save)
         file_menu.addAction(save_action)
 
@@ -295,8 +297,8 @@ class MainWindow(QMainWindow):
     def _quick_save(self) -> None:
         self._autosave()
         self._changes.clear()
-        self.status_message("Saved")
-        self.log_panel.log("Project state saved.", "info")
+        self.status_message("")
+        self.log_panel.log("Mod files written.", "info")
 
     def _undo(self) -> None:
         current = self.tabs.currentWidget()
@@ -365,16 +367,17 @@ class MainWindow(QMainWindow):
         # pyproject.toml at import time and store in a VERSION constant.
         QMessageBox.about(
             self,
-            "About HOI4 Modding Studio",
+            "About",
             "HOI4 Modding Studio v0.3\n\n"
-            "A fully-featured IDE for creating Hearts of Iron 4 mods.\n\n"
+            "A workbench for Hearts of Iron 4 modders.\n"
+            "No, you don't need to learn Paradox script.\n\n"
             "Built with PySide6 and Python.",
         )
 
     def status_message(self, msg: str) -> None:
         self._status_label.setText(msg)
 
-    def mark_dirty(self, description: str = "Project modified") -> None:
+    def mark_dirty(self, description: str = "Mod changed") -> None:
         self._changes.append(description)
 
     def refresh_all_tag_dropdowns(self):
@@ -403,7 +406,7 @@ class MainWindow(QMainWindow):
         dlg.setMinimumWidth(420)
         layout = QVBoxLayout(dlg)
 
-        label = QLabel("The following changes have not been saved:")
+        label = QLabel("You have unsaved changes:")
         label.setStyleSheet("font-weight: 600; font-size: 13px;")
         layout.addWidget(label)
 
@@ -496,11 +499,11 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
             app = QApplication([])
 
         dlg = QDialog()
-        dlg.setWindowTitle("HOI4 Modding Studio - Error")
+        dlg.setWindowTitle("Something broke")
         dlg.setMinimumSize(560, 420)
         layout = QVBoxLayout(dlg)
 
-        title = QLabel("HOI4 Modding Studio encountered an error")
+        title = QLabel("HOI4 Modding Studio hit a problem")
         title.setStyleSheet("font-weight: 700; font-size: 14px; margin-bottom: 4px;")
         layout.addWidget(title)
 
@@ -510,7 +513,8 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
         layout.addWidget(msg)
 
         hint = QLabel(
-            "Click <b>Send Bug Report</b> to open a GitHub issue with this report."
+            "The crash details are copied to your clipboard. "
+            "Open a GitHub issue and paste them in, and I'll fix it."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("font-size: 11px; padding: 4px 0; color: #7a7360;")

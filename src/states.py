@@ -113,7 +113,7 @@ def apply_single_state(
             if not backup_path.exists():
                 backup_path.write_text(txt, encoding="utf-8")
         f.write_text(patched, encoding="utf-8")
-        return {"state_id": state_id, "success": True, "message": "Updated successfully"}
+        return {"state_id": state_id, "success": True, "message": "State written."}
     except Exception as e:
         return {"state_id": state_id, "success": False, "message": str(e)}
 

@@ -99,7 +99,7 @@ class StatePropertiesTab(QWidget):
 
     def load_state_properties(self):
         if not self.mw.paths:
-            self.status_label.setText("Error: Load project first")
+            self.status_label.setText("Load a mod first.")
             return
 
         state_id_text = self.state_id_input.text().strip()
@@ -141,7 +141,7 @@ class StatePropertiesTab(QWidget):
 
     def save_state_properties(self):
         if not self.mw.paths:
-            self.status_label.setText("Error: Load project first")
+            self.status_label.setText("Load a mod first.")
             return
 
         state_id_text = self.state_id_input.text().strip()

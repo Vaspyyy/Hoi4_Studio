@@ -177,6 +177,14 @@ def _parse_state_owners(
     prov_to_state: dict[int, int] = {}
     state_names: dict[int, str] = {}
 
+    # file names like "99-Jutland.txt" → state id 99
+    _stid_re = re.compile(r"^(\d+)")
+
+    # detect which state IDs the mod overrides (even if the file is empty
+    # or only contains a comment).  We track these so we can clear out
+    # vanilla data for any state that the mod explicitly blankets.
+    mod_overrides: set[int] = set()
+
     for states_dir in states_dirs:
         if not states_dir.is_dir():
             continue
@@ -185,13 +193,27 @@ def _parse_state_owners(
                 txt = f.read_text(encoding="utf-8", errors="ignore")
                 root = parse_pdx(txt)
             except Exception:
-                continue
+                root = None
+
+            # even if parsing failed, the mod still intends to override this
+            # state — track the ID from the filename
+            fm = _stid_re.match(f.name)
+            file_state_id = int(fm.group(1)) if fm else None
 
             state_block = None
-            for child in root.children:
-                if child.key == "state":
-                    state_block = child
-                    break
+            if root is not None:
+                for child in root.children:
+                    if child.key == "state":
+                        state_block = child
+                        break
+
+            # ---- detect mod-owned paths (after vanilla) ----
+            is_mod_dir = any(
+                "mod" in str(p).split("/") for p in states_dirs
+            ) or "mod" in str(states_dir)
+            if is_mod_dir and file_state_id is not None:
+                mod_overrides.add(file_state_id)
+
             if state_block is None:
                 continue
 
@@ -202,6 +224,11 @@ def _parse_state_owners(
                 state_id = int(sid_node.value)
             except ValueError:
                 continue
+
+            # if the mod has a state block for this ID, this is a definitive
+            # override — remove it from the overrides set so it isn't
+            # blanket-cleared later
+            mod_overrides.discard(state_id)
 
             name_node = state_block.find("name")
             if name_node and name_node.value:
@@ -226,6 +253,13 @@ def _parse_state_owners(
                             prov_to_state[int(pc.value)] = state_id
                         except ValueError:
                             continue
+
+    # clear vanilla data for states that the mod explicitly overrides
+    # (files exist in mod dir but had no owner/provinces → blank them)
+    for sid in mod_overrides:
+        owner_map.pop(sid, None)
+        state_names.pop(sid, None)
+        prov_to_state = {p: s for p, s in prov_to_state.items() if s != sid}
 
     return owner_map, prov_to_state, state_names
 
@@ -1387,6 +1421,11 @@ class WorldMapTab(QWidget):
             self._rendered = True
             QTimer.singleShot(100, self._try_auto_render)
 
+    def invalidate(self) -> None:
+        """Reset cache so the next tab switch re-detects and re-renders."""
+        self._rendered = False
+        self._cache = _MapCache()
+
     def _try_auto_render(self) -> None:
         if not self.mw.paths or not self.mw.paths.mod_root:
             self.status_label.setText("Load a mod first. Head over to the Project tab.")
@@ -1431,10 +1470,11 @@ class WorldMapTab(QWidget):
         QMessageBox.information(self, "Map Files Not Found", msg)
 
     def _browse_provinces_bmp(self) -> None:
+        start_dir = str(self.mw.paths.mod_root / "map") if self.mw.paths and self.mw.paths.mod_root else ""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select provinces.bmp",
-            "",
+            start_dir,
             "Image Files (*.bmp *.png);;All Files (*)",
         )
         if path:
@@ -1442,10 +1482,11 @@ class WorldMapTab(QWidget):
             self.status_label.setText(f"provinces: {self._provinces_bmp_path.name}")
 
     def _browse_definition_csv(self) -> None:
+        start_dir = str(self.mw.paths.mod_root / "map") if self.mw.paths and self.mw.paths.mod_root else ""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select definition.csv",
-            "",
+            start_dir,
             "CSV Files (*.csv);;All Files (*)",
         )
         if path:
@@ -1454,11 +1495,7 @@ class WorldMapTab(QWidget):
 
     def _load_country_colors(self) -> dict[str, tuple[int, int, int]]:
         colors: dict[str, tuple[int, int, int]] = {}
-
-        if self.mw.paths and self.mw.paths.hoi4_install:
-            vanilla_tags = self.mw.paths.hoi4_install / "common" / "country_tags"
-            vanilla_countries = self.mw.paths.hoi4_install / "common" / "countries"
-            colors.update(_parse_country_colors(vanilla_tags, vanilla_countries))
+        mod_has_overrides = False
 
         if self.mw.paths and self.mw.paths.mod_root:
             mod_tags = self.mw.paths.mod_root / "common" / "country_tags"
@@ -1466,6 +1503,14 @@ class WorldMapTab(QWidget):
             colors.update(_parse_country_colors(mod_tags, mod_countries))
             if not mod_tags.is_dir():
                 colors.update(_parse_country_colors(Path("."), mod_countries))
+            # if the mod has country_tags with override files (even empty),
+            # skip vanilla colors — the mod intentionally blanks them out
+            mod_has_overrides = mod_tags.is_dir() and any(mod_tags.iterdir())
+
+        if self.mw.paths and self.mw.paths.hoi4_install and not mod_has_overrides:
+            vanilla_tags = self.mw.paths.hoi4_install / "common" / "country_tags"
+            vanilla_countries = self.mw.paths.hoi4_install / "common" / "countries"
+            colors.update(_parse_country_colors(vanilla_tags, vanilla_countries))
 
         self._country_colors = colors
         return colors

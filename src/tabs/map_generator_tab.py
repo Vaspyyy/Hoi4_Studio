@@ -830,6 +830,14 @@ class MapGeneratorTab(QWidget):
                 self.mw.log_panel.log(f"Could not generate .mod file: {e}", "warning")
                 mod_msg = f"\n\n⚠ .mod file not generated: {e}"
 
+        # invalidate the world map viewer so it re-detects on next tab switch
+        try:
+            world_map = self.mw._tab_refs.get("Province Map")
+            if world_map and hasattr(world_map, "invalidate"):
+                world_map.invalidate()
+        except Exception:
+            pass
+
         QMessageBox.information(
             self, "Export Complete",
             f"Map exported to your mod folder.\n\n"

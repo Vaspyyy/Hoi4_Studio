@@ -979,7 +979,7 @@ def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) ->
         for src_file in tag_src.glob("*.txt"):
             dst_file = tag_dst / src_file.name
             if not dst_file.exists():
-                dst_file.write_text("", encoding="utf-8")
+                dst_file.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
     # ---- 2. blank country common definitions ----
     #    vanilla: common/countries/*.txt (color, graphical culture, etc.)
@@ -990,19 +990,28 @@ def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) ->
         for src_file in country_src.glob("*.txt"):
             dst_file = country_dst / src_file.name
             if not dst_file.exists():
-                dst_file.write_text("", encoding="utf-8")
+                dst_file.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
     # ---- 3. blank state history ----
-    #    re-create *empty* state files with same filenames so vanilla data
-    #    is overlaid with nothing (works alongside replace_path in .mod)
+    #    write a minimal valid state block with no owner/provinces so the
+    #    viewer (and game) know this state is explicitly overridden.
     state_src = base / "history" / "states"
     state_dst = mod_root / "history" / "states"
     state_dst.mkdir(parents=True, exist_ok=True)
     if state_src.is_dir():
+        _stid_re = re.compile(r"^(\d+)")
         for src_file in state_src.glob("*.txt"):
             dst_file = state_dst / src_file.name
-            if not dst_file.exists():
-                dst_file.write_text("", encoding="utf-8")
+            if dst_file.exists():
+                continue
+            m = _stid_re.match(src_file.name)
+            if m:
+                dst_file.write_text(
+                    f"state = {{ id = {m.group(1)} }} # HOI4 Studio override\n",
+                    encoding="utf-8",
+                )
+            else:
+                dst_file.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
     # ---- 4. blank country history ----
     hist_src = base / "history" / "countries"
@@ -1012,7 +1021,7 @@ def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) ->
         for src_file in hist_src.glob("*.txt"):
             dst_file = hist_dst / src_file.name
             if not dst_file.exists():
-                dst_file.write_text("", encoding="utf-8")
+                dst_file.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
     # ---- 5. blank unit history ----
     unit_src = base / "history" / "units"
@@ -1022,7 +1031,7 @@ def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) ->
         for src_file in unit_src.glob("*.txt"):
             dst_file = unit_dst / src_file.name
             if not dst_file.exists():
-                dst_file.write_text("", encoding="utf-8")
+                dst_file.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

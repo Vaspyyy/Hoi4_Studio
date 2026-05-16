@@ -944,25 +944,61 @@ def export_all_map_files(
     _blank_vanilla_overrides(mod_root, hoi4_install)
     results["history+tags/"] = "vanilla overrides written"
 
+    # generate state history files from territory data so the viewer
+    # (and game) can render provinces with their state assignments
+    export_states(territory_data, mod_root)
+    results["history/states/"] = f"{len(territory_data)} state files"
+
     return results
 
 
 # ---------------------------------------------------------------------------
-# helpers
+# state history generation
 # ---------------------------------------------------------------------------
 
+def export_states(territory_data: list[dict], mod_root: Path) -> None:
+    """Generate history/states/*.txt from territory data.
+
+    Each territory becomes a state.  Province IDs come from each
+    territory's province_ids list.  State names use "STATE_N" format
+    for localisation key lookups.
+    """
+    state_dir = mod_root / "history" / "states"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    for t in territory_data:
+        tid = t.get("territory_id", 0)
+        provs = t.get("province_ids", [])
+
+        # sort for deterministic output
+        prov_list = " ".join(str(p) for p in sorted(provs))
+
+        lines: list[str] = []
+        lines.append("state = {")
+        lines.append(f"    id = {tid}")
+        lines.append(f"    name = \"STATE_{tid}\"")
+        if prov_list:
+            lines.append(f"    provinces = {{ {prov_list} }}")
+        lines.append("}")
+
+        filename = f"{tid}-state.txt"
+        (state_dir / filename).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    logger.info("Wrote %d state files to %s", len(territory_data), state_dir)
+
 def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) -> None:
-    """Create empty override files for all vanilla history and tag definitions.
+    """Create empty override files for vanilla country/history definitions.
 
     HOI4 loads base-game files first, then overlays mod files with matching
     names.  To get a clean-slate map with zero countries we create empty
-    versions of vanilla country-tag definitions so the game sees no tags,
-    and empty history/states/ files so vanilla state assignments are
-    wiped.
+    versions of vanilla country-tag and country-history files so the game
+    sees no tags.
+
+    State files are NOT blanked here — they are generated from territory
+    data by export_states() instead.
     """
     if hoi4_install is None:
-        # fallback: just create the empty dirs (no vfs overrides)
-        for d in ("history/countries", "history/states", "history/units",
+        for d in ("history/countries", "history/units",
                   "common/country_tags", "common/countries"):
             (mod_root / d).mkdir(parents=True, exist_ok=True)
         return
@@ -992,28 +1028,7 @@ def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) ->
             if not dst_file.exists():
                 dst_file.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
-    # ---- 3. blank state history ----
-    #    write a minimal valid state block with no owner/provinces so the
-    #    viewer (and game) know this state is explicitly overridden.
-    state_src = base / "history" / "states"
-    state_dst = mod_root / "history" / "states"
-    state_dst.mkdir(parents=True, exist_ok=True)
-    if state_src.is_dir():
-        _stid_re = re.compile(r"^(\d+)")
-        for src_file in state_src.glob("*.txt"):
-            dst_file = state_dst / src_file.name
-            if dst_file.exists():
-                continue
-            m = _stid_re.match(src_file.name)
-            if m:
-                dst_file.write_text(
-                    f"state = {{ id = {m.group(1)} }} # HOI4 Studio override\n",
-                    encoding="utf-8",
-                )
-            else:
-                dst_file.write_text("# HOI4 Studio override\n", encoding="utf-8")
-
-    # ---- 4. blank country history ----
+    # ---- 3. blank country history ----
     hist_src = base / "history" / "countries"
     hist_dst = mod_root / "history" / "countries"
     hist_dst.mkdir(parents=True, exist_ok=True)
@@ -1023,7 +1038,7 @@ def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) ->
             if not dst_file.exists():
                 dst_file.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
-    # ---- 5. blank unit history ----
+    # ---- 4. blank unit history ----
     unit_src = base / "history" / "units"
     unit_dst = mod_root / "history" / "units"
     unit_dst.mkdir(parents=True, exist_ok=True)

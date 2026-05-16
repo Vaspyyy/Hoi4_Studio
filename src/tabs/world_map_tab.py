@@ -411,17 +411,23 @@ def _render_political_map(
         rgb_key = (int(r), int(g), int(b))
         pid = rgb_to_prov.get(rgb_key)
         if pid is not None:
-            tag = prov_to_owner_tag.get(pid)
-            if tag:
+            # province is in definition.csv — if it belongs to a state
+            # (prov_to_state) mark it as land; otherwise keep as ocean.
+            sid = prov_to_state.get(pid)
+            if sid is not None:
                 is_ocean[r, g, b] = False
-                if tag in resolved_colors:
-                    cr, cg, cb = resolved_colors[tag]
-                    lut[r, g, b] = [cr, cg, cb]
-                else:
-                    h_val = hash(tag) & 0xFFFFFFFF
-                    hue = (h_val % 360) / 360.0
-                    rv, gv, bv = hsv_to_rgb(hue, 0.55, 0.65)
-                    lut[r, g, b] = [int(rv * 255), int(gv * 255), int(bv * 255)]
+                # default land colour when state has no owner yet
+                lut[r, g, b] = [120, 100, 80]
+                tag = prov_to_owner_tag.get(pid)
+                if tag:
+                    if tag in resolved_colors:
+                        cr, cg, cb = resolved_colors[tag]
+                        lut[r, g, b] = [cr, cg, cb]
+                    else:
+                        h_val = hash(tag) & 0xFFFFFFFF
+                        hue = (h_val % 360) / 360.0
+                        rv, gv, bv = hsv_to_rgb(hue, 0.55, 0.65)
+                        lut[r, g, b] = [int(rv * 255), int(gv * 255), int(bv * 255)]
 
     if progress_cb:
         progress_cb(total, total)
@@ -1540,10 +1546,14 @@ class WorldMapTab(QWidget):
             return
 
         states_dirs: list[Path] = []
-        if self.mw.paths and self.mw.paths.hoi4_install:
-            states_dirs.append(self.mw.paths.hoi4_install / "history" / "states")
+        mod_has_states = False
         if self.mw.paths and self.mw.paths.mod_root:
-            states_dirs.append(self.mw.paths.mod_root / "history" / "states")
+            mod_states = self.mw.paths.mod_root / "history" / "states"
+            if mod_states.is_dir() and any(mod_states.iterdir()):
+                mod_has_states = True
+            states_dirs.append(mod_states)
+        if self.mw.paths and self.mw.paths.hoi4_install and not mod_has_states:
+            states_dirs.append(self.mw.paths.hoi4_install / "history" / "states")
 
         loc_dirs: list[Path] = []
         if self.mw.paths and self.mw.paths.hoi4_install:

@@ -4,7 +4,7 @@ from typing import Callable
 
 import numpy as np
 from PIL import Image
-from scipy.ndimage import distance_transform_edt, label as ndlabel
+from scipy.ndimage import binary_dilation, distance_transform_edt, label as ndlabel
 from scipy.spatial import cKDTree
 
 from . import config
@@ -178,8 +178,18 @@ def _remove_enclaves(pmap: np.ndarray, mask: np.ndarray) -> None:
         cleared |= small
 
     if cleared.any() and (pmap >= 0).any():
-        _, (ny, nx) = distance_transform_edt(pmap < 0, return_indices=True)
-        pmap[cleared] = pmap[ny[cleared], nx[cleared]]
+        # reassign each cleared fragment to the neighbouring territory
+        # that shares the longest border within the fill mask.
+        # (was: Euclidean distance_transform_edt — that could reassign
+        #  a fragment back to the SAME territory across a water barrier.)
+        cleared_labels, n_frags = ndlabel(cleared & mask)
+        for cl in range(1, n_frags + 1):
+            frag = cleared_labels == cl
+            dilated = binary_dilation(frag)
+            neighbours = dilated & (pmap >= 0) & mask
+            nbr_ids, nbr_counts = np.unique(pmap[neighbours], return_counts=True)
+            if len(nbr_ids) > 0:
+                pmap[frag] = nbr_ids[nbr_counts.argmax()]
 
 
 def assign_regions(

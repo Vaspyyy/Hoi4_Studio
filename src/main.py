@@ -226,6 +226,26 @@ class MainWindow(QMainWindow):
         self._start_update_check()
         logger.info("MainWindow ready: %d tabs", self.tabs.count())
 
+    def _ensure_tab_loaded(self, name: str):
+        """Return the widget for a named tab, creating it lazily if needed."""
+        widget = self._tab_refs.get(name)
+        if widget is not None:
+            return widget
+        # Lazy tab hasn't been shown yet — force-load it
+        for i in range(self.tabs._tab_bar.count()):
+            if self.tabs._tab_bar.tabText(i) == name:
+                self.tabs._ensure_loaded(i)
+                return self._tab_refs.get(name)
+        return None
+
+    @property
+    def states(self):
+        return self._ensure_tab_loaded("State Browser")
+
+    @property
+    def state_props(self):
+        return self._ensure_tab_loaded("State Properties")
+
     def _setup_menus(self) -> None:
         # TODO: Ctrl+1..Ctrl+9 shortcuts to jump to specific tabs.
         # Register them dynamically from TAB_REGISTRY so new tabs get

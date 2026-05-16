@@ -863,6 +863,13 @@ class MapGraphicsView(QGraphicsView):
         self._rubber_band_origin: Optional[QPointF] = None
         self._rubber_band_item: Optional[QGraphicsRectItem] = None
 
+        # Debounced highlight rebuild — avoids n+1 problem when
+        # toggling many states in rapid succession (rubber band, batch ops).
+        self._highlight_timer = QTimer(self)
+        self._highlight_timer.setSingleShot(True)
+        self._highlight_timer.setInterval(30)
+        self._highlight_timer.timeout.connect(self._on_highlight_timer)
+
         self._show_labels = False
         self._label_items: list[_CountryLabelItem] = []
         self._localisation: dict[str, str] = {}
@@ -1084,6 +1091,12 @@ class MapGraphicsView(QGraphicsView):
             self._selected_state_ids.discard(state_id)
         else:
             self._selected_state_ids.add(state_id)
+        # Debounce: timer resets on each toggle, rebuild runs once
+        # after the last toggle (30ms idle).
+        self._highlight_timer.start()
+
+    def _on_highlight_timer(self) -> None:
+        """Called by debounce timer — actually rebuild the highlight."""
         self._rebuild_highlight()
         self._refresh_display()
 
@@ -1279,21 +1292,21 @@ class MapGraphicsView(QGraphicsView):
         if x1 >= x2 or y1 >= y2:
             return  # zero-area rect (click without drag)
 
-        # Collect unique state IDs in the rectangle
+        # Vectorized: numpy unique on the crop gets us distinct (R,G,B) tuples
+        # in one C-level call. Then we only do Python dict lookups for the
+        # few unique province colors (dozens), not every pixel (200K+).
         crop = self._provinces_arr[y1:y2, x1:x2, :]
+        unique_colors = np.unique(crop.reshape(-1, 3), axis=0)
         seen: set[int] = set()
-        for py in range(crop.shape[0]):
-            for px in range(crop.shape[1]):
-                r = int(crop[py, px, 0])
-                g = int(crop[py, px, 1])
-                b = int(crop[py, px, 2])
-                pid = self._rgb_to_prov.get((r, g, b))
-                if pid is None:
-                    continue
-                sid = self._prov_to_state.get(pid)
-                if sid is not None and sid not in seen:
-                    seen.add(sid)
-                    self.toggle_mass_transfer_state.emit(sid)
+        for color in unique_colors:
+            r, g, b = int(color[0]), int(color[1]), int(color[2])
+            pid = self._rgb_to_prov.get((r, g, b))
+            if pid is None:
+                continue
+            sid = self._prov_to_state.get(pid)
+            if sid is not None and sid not in seen:
+                seen.add(sid)
+                self.toggle_mass_transfer_state.emit(sid)
 
     def contextMenuEvent(self, event) -> None:
         info = self._lookup_at(event.pos())

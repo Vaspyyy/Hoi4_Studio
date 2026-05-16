@@ -330,7 +330,7 @@ _REPLACE_PATH_DIRS: set[str] = {
     "common/ai_peace", "common/ai_strategy", "common/ai_strategy_plans",
     "common/ai_templates", "common/ai_faction_theaters", "common/ai_navy",
     "common/autonomous_states", "common/bookmarks",
-    "common/countries", "common/country_tags",
+    "common/countries", "common/country_tags", "common/country_tag_aliases",
     "common/decisions", "common/decisions/categories",
     "common/dynamic_modifiers", "common/factions/templates",
     "common/intelligence_agencies", "common/intelligence_agency_upgrades",

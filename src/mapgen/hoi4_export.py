@@ -805,6 +805,7 @@ def export_all_map_files(
     *,
     coastal: set[int] | None = None,
     adjacencies: set[tuple[int, int]] | None = None,
+    hoi4_install: str | Path | None = None,
 ) -> dict[str, str]:
     """
     Write all HOI4 map files into mod_root/map/ and mod_root/localisation/.
@@ -938,9 +939,10 @@ def export_all_map_files(
     export_localisation_placeholders(province_data, territory_data, loc_dir)
     results["localisation/"] = "3 yml files"
 
-    # create empty history dirs so vanilla history doesn't leak into our custom map
-    _ensure_empty_history_dirs(mod_root)
-    results["history/"] = "empty countries, states, units"
+    # create empty history and country-tag files so vanilla content
+    # doesn't leak into our custom map (no allies/axis countries showing)
+    _blank_vanilla_overrides(mod_root, hoi4_install)
+    results["history+tags/"] = "vanilla overrides written"
 
     return results
 
@@ -949,15 +951,78 @@ def export_all_map_files(
 # helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_empty_history_dirs(mod_root: Path) -> None:
-    """Create empty history/ directories so vanilla history is fully replaced.
+def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) -> None:
+    """Create empty override files for all vanilla history and tag definitions.
 
-    Without these empty dirs and replace_path in the .mod descriptor, the
-    base game's history/states files assign vanilla countries to provinces
-    on the custom map, producing garbled ownership.
+    HOI4 loads base-game files first, then overlays mod files with matching
+    names.  To get a clean-slate map with zero countries we create empty
+    versions of vanilla country-tag definitions so the game sees no tags,
+    and empty history/states/ files so vanilla state assignments are
+    wiped.
     """
-    for d in ("history/countries", "history/states", "history/units"):
-        (mod_root / d).mkdir(parents=True, exist_ok=True)
+    if hoi4_install is None:
+        # fallback: just create the empty dirs (no vfs overrides)
+        for d in ("history/countries", "history/states", "history/units",
+                  "common/country_tags", "common/countries"):
+            (mod_root / d).mkdir(parents=True, exist_ok=True)
+        return
+
+    base = Path(hoi4_install)
+
+    # ---- 1. blank country-tag definitions ----
+    #    vanilla: common/country_tags/00_countries.txt defines all 90+ tags
+    #    empty copy → no country tags at all → countries (0)
+    tag_src = base / "common" / "country_tags"
+    tag_dst = mod_root / "common" / "country_tags"
+    if tag_src.is_dir():
+        tag_dst.mkdir(parents=True, exist_ok=True)
+        for src_file in tag_src.glob("*.txt"):
+            dst_file = tag_dst / src_file.name
+            if not dst_file.exists():
+                dst_file.write_text("", encoding="utf-8")
+
+    # ---- 2. blank country common definitions ----
+    #    vanilla: common/countries/*.txt (color, graphical culture, etc.)
+    country_src = base / "common" / "countries"
+    country_dst = mod_root / "common" / "countries"
+    if country_src.is_dir():
+        country_dst.mkdir(parents=True, exist_ok=True)
+        for src_file in country_src.glob("*.txt"):
+            dst_file = country_dst / src_file.name
+            if not dst_file.exists():
+                dst_file.write_text("", encoding="utf-8")
+
+    # ---- 3. blank state history ----
+    #    re-create *empty* state files with same filenames so vanilla data
+    #    is overlaid with nothing (works alongside replace_path in .mod)
+    state_src = base / "history" / "states"
+    state_dst = mod_root / "history" / "states"
+    state_dst.mkdir(parents=True, exist_ok=True)
+    if state_src.is_dir():
+        for src_file in state_src.glob("*.txt"):
+            dst_file = state_dst / src_file.name
+            if not dst_file.exists():
+                dst_file.write_text("", encoding="utf-8")
+
+    # ---- 4. blank country history ----
+    hist_src = base / "history" / "countries"
+    hist_dst = mod_root / "history" / "countries"
+    hist_dst.mkdir(parents=True, exist_ok=True)
+    if hist_src.is_dir():
+        for src_file in hist_src.glob("*.txt"):
+            dst_file = hist_dst / src_file.name
+            if not dst_file.exists():
+                dst_file.write_text("", encoding="utf-8")
+
+    # ---- 5. blank unit history ----
+    unit_src = base / "history" / "units"
+    unit_dst = mod_root / "history" / "units"
+    unit_dst.mkdir(parents=True, exist_ok=True)
+    if unit_src.is_dir():
+        for src_file in unit_src.glob("*.txt"):
+            dst_file = unit_dst / src_file.name
+            if not dst_file.exists():
+                dst_file.write_text("", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

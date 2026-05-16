@@ -94,12 +94,13 @@ class ExportWorker(QThread):
     finished = Signal(dict)
     error = Signal(str)
 
-    def __init__(self, province_data, province_image, territory_data, mod_root):
+    def __init__(self, province_data, province_image, territory_data, mod_root, hoi4_install=None):
         super().__init__()
         self.province_data = province_data
         self.province_image = province_image
         self.territory_data = territory_data
         self.mod_root = mod_root
+        self.hoi4_install = hoi4_install
 
     def run(self) -> None:
         try:
@@ -109,6 +110,7 @@ class ExportWorker(QThread):
                 self.province_image,
                 self.territory_data,
                 self.mod_root,
+                hoi4_install=self.hoi4_install,
             )
             self.finished.emit(results)
         except Exception as e:
@@ -788,6 +790,7 @@ class MapGeneratorTab(QWidget):
             self._province_result.image,
             self._territory_result.metadata,
             mod_root,
+            hoi4_install=str(self.mw.paths.hoi4_install) if self.mw.paths else None,
         )
         self._export_worker.progress_msg.connect(self._on_export_progress)
         self._export_worker.finished.connect(self._on_export_done)

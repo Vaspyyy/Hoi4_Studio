@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QGraphicsItem,
     QGraphicsPixmapItem,
+    QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsView,
     QHBoxLayout,
@@ -858,6 +859,10 @@ class MapGraphicsView(QGraphicsView):
         self._state_lut: Optional[np.ndarray] = None
         self._cached_state_img: Optional[np.ndarray] = None
 
+        # Rectangle selection (mass transfer mode)
+        self._rubber_band_origin: Optional[QPointF] = None
+        self._rubber_band_item: Optional[QGraphicsRectItem] = None
+
         self._show_labels = False
         self._label_items: list[_CountryLabelItem] = []
         self._localisation: dict[str, str] = {}
@@ -1068,6 +1073,7 @@ class MapGraphicsView(QGraphicsView):
         self._mass_transfer_mode = enabled
         if not enabled:
             self._selected_state_ids.clear()
+            self._abort_rubber_band()
         self._refresh_display()
 
     def get_selected_state_ids(self) -> set[int]:
@@ -1194,9 +1200,28 @@ class MapGraphicsView(QGraphicsView):
                 self.toggle_mass_transfer_state.emit(info["state_id"])
                 event.accept()
                 return
+            # Clicked empty/ocean space — start rubber-band drag
+            self._rubber_band_origin = self.mapToScene(event.pos())
+            event.accept()
+            return  # don't let ScrollHandDrag start panning
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._rubber_band_origin is not None:
+            # Draw rubber-band rectangle
+            end = self.mapToScene(event.pos())
+            rect = QRectF(self._rubber_band_origin, end).normalized()
+            if self._rubber_band_item is None:
+                pen = QPen(QColor(0, 180, 255), 2, Qt.PenStyle.DashLine)
+                pen.setCosmetic(True)  # 1px regardless of zoom
+                self._rubber_band_item = self._scene.addRect(
+                    rect, pen, QColor(0, 180, 255, 40)
+                )
+            else:
+                self._rubber_band_item.setRect(rect)
+            event.accept()
+            return
+
         if not self._view_states or self._provinces_arr is None:
             super().mouseMoveEvent(event)
             return
@@ -1218,6 +1243,57 @@ class MapGraphicsView(QGraphicsView):
 
         self.setToolTip(" | ".join(parts))
         super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._rubber_band_origin is not None:
+            end = self.mapToScene(event.pos())
+            rect = QRectF(self._rubber_band_origin, end).normalized()
+            self._finish_rubber_band(rect)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _abort_rubber_band(self) -> None:
+        """Remove rubber-band rectangle without selecting anything."""
+        if self._rubber_band_item is not None:
+            self._scene.removeItem(self._rubber_band_item)
+            self._rubber_band_item = None
+        self._rubber_band_origin = None
+
+    def _finish_rubber_band(self, rect: QRectF) -> None:
+        """Select all states that have at least one province inside rect."""
+        if self._rubber_band_item is not None:
+            self._scene.removeItem(self._rubber_band_item)
+            self._rubber_band_item = None
+        self._rubber_band_origin = None
+
+        if self._provinces_arr is None:
+            return
+
+        h, w = self._provinces_arr.shape[:2]
+        x1 = max(0, int(rect.left()))
+        y1 = max(0, int(rect.top()))
+        x2 = min(w, int(rect.right()) + 1)
+        y2 = min(h, int(rect.bottom()) + 1)
+
+        if x1 >= x2 or y1 >= y2:
+            return  # zero-area rect (click without drag)
+
+        # Collect unique state IDs in the rectangle
+        crop = self._provinces_arr[y1:y2, x1:x2, :]
+        seen: set[int] = set()
+        for py in range(crop.shape[0]):
+            for px in range(crop.shape[1]):
+                r = int(crop[py, px, 0])
+                g = int(crop[py, px, 1])
+                b = int(crop[py, px, 2])
+                pid = self._rgb_to_prov.get((r, g, b))
+                if pid is None:
+                    continue
+                sid = self._prov_to_state.get(pid)
+                if sid is not None and sid not in seen:
+                    seen.add(sid)
+                    self.toggle_mass_transfer_state.emit(sid)
 
     def contextMenuEvent(self, event) -> None:
         info = self._lookup_at(event.pos())

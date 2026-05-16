@@ -42,7 +42,7 @@ class EventBuilderTab(QWidget):
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
-        layout.addWidget(create_section_title("Event Builder", self))
+        layout.addWidget(create_section_title("Event Chains", self))
 
         layout.addWidget(QLabel("Namespace"))
         self.namespace = QLineEdit("my_mod")

@@ -37,7 +37,7 @@ class LocalizationManagerTab(QWidget):
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
-        layout.addWidget(create_section_title("Localization Manager", self))
+        layout.addWidget(create_section_title("Localisation", self))
 
         search_row = QHBoxLayout()
         self.search = QLineEdit()

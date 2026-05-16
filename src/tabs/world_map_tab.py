@@ -1346,7 +1346,7 @@ class WorldMapTab(QWidget):
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
-        layout.addWidget(create_section_title("World Map", self))
+        layout.addWidget(create_section_title("Province Map", self))
 
         top = QHBoxLayout()
         self.btn_refresh = AnimatedButton("Refresh")
@@ -1768,7 +1768,7 @@ class WorldMapTab(QWidget):
 
         self._end_mass_transfer()
 
-        idx = self._find_tab_index("States (IDs)")
+        idx = self._find_tab_index("State Browser")
         if idx >= 0:
             self.mw.tabs.setCurrentIndex(idx)
 

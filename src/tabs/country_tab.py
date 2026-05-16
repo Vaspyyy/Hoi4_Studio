@@ -237,7 +237,7 @@ class CountryTab(QWidget):
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
-        layout.addWidget(create_section_title("Country Builder", self))
+        layout.addWidget(create_section_title("Nation Designer", self))
 
         rowpick = QHBoxLayout()
         self.tag_picker = QComboBox()

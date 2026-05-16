@@ -195,7 +195,7 @@ class FocusTab(QWidget):
         outer = QVBoxLayout(self)
         card, card_layout = create_card_widget(self)
 
-        card_layout.addWidget(create_section_title("Focus Tree Editor", self))
+        card_layout.addWidget(create_section_title("Focus Trees", self))
 
         main_layout = QHBoxLayout()
 

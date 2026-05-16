@@ -77,7 +77,7 @@ class StatesTab(QWidget):
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
-        layout.addWidget(create_section_title("States (IDs)", self))
+        layout.addWidget(create_section_title("State Browser", self))
 
         row = QHBoxLayout()
         row.addWidget(QLabel("TAG"))

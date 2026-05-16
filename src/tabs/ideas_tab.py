@@ -42,7 +42,7 @@ class IdeasTab(QWidget):
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
-        layout.addWidget(create_section_title("Ideas / National Spirit", self))
+        layout.addWidget(create_section_title("National Spirits", self))
 
         rowpick = QHBoxLayout()
         self.tag_picker = TagPickerWidget()

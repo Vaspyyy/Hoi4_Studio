@@ -763,9 +763,12 @@ def export_localisation_placeholders(
     for d in province_data:
         pid = d["province_id"]
         prov_lines.append(f' PROV{pid}:0 "Province {pid}"')
+    # HOI4 requires localisation .yml files to start with a UTF-8 BOM
+    bom = "\ufeff"
+
     try:
         (out_dir / "generated_provinces_l_english.yml").write_text(
-            "\n".join(prov_lines), encoding="utf-8"
+            bom + "\n".join(prov_lines), encoding="utf-8"
         )
     except OSError as e:
         logger.error("Failed to write province localisation: %s", e)
@@ -776,7 +779,7 @@ def export_localisation_placeholders(
         strat_lines.append(f' STRATEGICREGION_{tid}:0 "Region {tid}"')
     try:
         (out_dir / "generated_strategic_regions_l_english.yml").write_text(
-            "\n".join(strat_lines), encoding="utf-8"
+            bom + "\n".join(strat_lines), encoding="utf-8"
         )
     except OSError as e:
         logger.error("Failed to write strategic region localisation: %s", e)
@@ -787,7 +790,7 @@ def export_localisation_placeholders(
         supply_lines.append(f' SUPPLYAREA_{tid}:0 "Supply Area {tid}"')
     try:
         (out_dir / "generated_supply_areas_l_english.yml").write_text(
-            "\n".join(supply_lines), encoding="utf-8"
+            bom + "\n".join(supply_lines), encoding="utf-8"
         )
     except OSError as e:
         logger.error("Failed to write supply area localisation: %s", e)

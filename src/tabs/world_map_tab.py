@@ -488,7 +488,14 @@ class MapRenderWorker(QThread):
             if cache and cache.ocean_texture is not None:
                 ocean_texture = cache.ocean_texture
             elif self.mod_root:
-                ocean_texture = _load_water_texture(self.mod_root, h, w, self.hoi4_install)
+                # Only fall back to vanilla ocean texture when the mod
+                # doesn't have its own provinces.bmp — vanilla Earth
+                # ocean patterns look wrong on custom/generated maps.
+                has_custom_map = (self.mod_root / "map" / "provinces.bmp").exists()
+                ocean_texture = _load_water_texture(
+                    self.mod_root, h, w,
+                    hoi4_install=None if has_custom_map else self.hoi4_install,
+                )
             else:
                 ocean_texture = None
             self.ocean_texture = ocean_texture
@@ -1566,9 +1573,10 @@ class WorldMapTab(QWidget):
         loc_fp = tuple(_fingerprint_dir(d) for d in loc_dirs)
 
         ocean_fp = None
+        has_custom_map = mod_root and (mod_root / "map" / "provinces.bmp").exists()
         if mod_root:
             ocean_fp = _fingerprint(mod_root / "map" / "terrain" / "colormap_water_0.dds")
-        if ocean_fp is None and hoi4_install:
+        if ocean_fp is None and hoi4_install and not has_custom_map:
             ocean_fp = _fingerprint(hoi4_install / "map" / "terrain" / "colormap_water_0.dds")
 
         rivers_fp = None

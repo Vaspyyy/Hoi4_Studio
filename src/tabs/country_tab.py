@@ -327,7 +327,7 @@ class CountryTab(QWidget):
         layout.addWidget(QLabel("Flag"))
         rf = QHBoxLayout()
         self.flag = QLineEdit()
-        self.flag.setToolTip("Path to a flag image (PNG/JPG). Will be converted to TGA in 3 sizes.")
+        self.flag.setToolTip("Path to a flag image (PNG/JPG/SVG). Will be converted to TGA in 3 sizes.")
         bf = AnimatedButton("Browse")
         bf.clicked.connect(lambda: self.pick_img(self.flag))
         rf.addWidget(self.flag)
@@ -444,7 +444,7 @@ class CountryTab(QWidget):
             self.color_swatch.set_color(r, g, b)
 
     def pick_img(self, le: QLineEdit):
-        f, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.png *.jpg *.jpeg)")
+        f, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.png *.jpg *.jpeg *.svg)")
         if f:
             le.setText(f)
 

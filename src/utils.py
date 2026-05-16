@@ -12,10 +12,37 @@ import logging
 import subprocess
 import shutil
 from pathlib import Path
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
+import tempfile
 
 
 logger = logging.getLogger("hoi4_studio.utils")
+
+
+def _open_image(src: Path) -> Image.Image:
+    """Open an image file, with SVG→raster fallback via ImageMagick."""
+    try:
+        return Image.open(src)
+    except UnidentifiedImageError:
+        if src.suffix.lower() == ".svg":
+            return _rasterize_svg(src)
+        raise
+
+
+def _rasterize_svg(svg_path: Path) -> Image.Image:
+    """Convert an SVG to a PIL Image via ImageMagick."""
+    if not _have_magick():
+        raise RuntimeError("ImageMagick is required to open SVG files")
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        # try 'magick' first, fall back to 'convert' for IM v6
+        bin_name = "magick" if shutil.which("magick") else "convert"
+        cmd = [bin_name, str(svg_path), str(tmp_path)]
+        subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+        return Image.open(tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def nuclear_delete_mod(
@@ -37,7 +64,7 @@ def nuclear_delete_mod(
 def import_flag_to_mod(
     mod_root: Path, tag: str, src_image: Path, vanilla_override: bool = False
 ) -> None:
-    with Image.open(src_image) as img:
+    with _open_image(src_image) as img:
         rgba = img.convert("RGBA")
         suffixes = (
             [""]
@@ -72,7 +99,7 @@ def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: 
     size = (156, 210)
     png = out_dir / f"{name_slug}.png"
     dds = out_dir / f"{name_slug}.dds"
-    with Image.open(src_image) as img:
+    with _open_image(src_image) as img:
         rgba = img.convert("RGBA").resize(size, Image.LANCZOS)
     rgba.save(png, format="PNG")
     if not _have_magick():

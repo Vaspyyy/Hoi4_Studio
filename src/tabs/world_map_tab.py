@@ -177,14 +177,6 @@ def _parse_state_owners(
     prov_to_state: dict[int, int] = {}
     state_names: dict[int, str] = {}
 
-    # file names like "99-Jutland.txt" → state id 99
-    _stid_re = re.compile(r"^(\d+)")
-
-    # detect which state IDs the mod overrides (even if the file is empty
-    # or only contains a comment).  We track these so we can clear out
-    # vanilla data for any state that the mod explicitly blankets.
-    mod_overrides: set[int] = set()
-
     for states_dir in states_dirs:
         if not states_dir.is_dir():
             continue
@@ -193,27 +185,13 @@ def _parse_state_owners(
                 txt = f.read_text(encoding="utf-8", errors="ignore")
                 root = parse_pdx(txt)
             except Exception:
-                root = None
-
-            # even if parsing failed, the mod still intends to override this
-            # state — track the ID from the filename
-            fm = _stid_re.match(f.name)
-            file_state_id = int(fm.group(1)) if fm else None
+                continue
 
             state_block = None
-            if root is not None:
-                for child in root.children:
-                    if child.key == "state":
-                        state_block = child
-                        break
-
-            # ---- detect mod-owned paths (after vanilla) ----
-            is_mod_dir = any(
-                "mod" in str(p).split("/") for p in states_dirs
-            ) or "mod" in str(states_dir)
-            if is_mod_dir and file_state_id is not None:
-                mod_overrides.add(file_state_id)
-
+            for child in root.children:
+                if child.key == "state":
+                    state_block = child
+                    break
             if state_block is None:
                 continue
 
@@ -224,11 +202,6 @@ def _parse_state_owners(
                 state_id = int(sid_node.value)
             except ValueError:
                 continue
-
-            # if the mod has a state block for this ID, this is a definitive
-            # override — remove it from the overrides set so it isn't
-            # blanket-cleared later
-            mod_overrides.discard(state_id)
 
             name_node = state_block.find("name")
             if name_node and name_node.value:
@@ -253,13 +226,6 @@ def _parse_state_owners(
                             prov_to_state[int(pc.value)] = state_id
                         except ValueError:
                             continue
-
-    # clear vanilla data for states that the mod explicitly overrides
-    # (files exist in mod dir but had no owner/provinces → blank them)
-    for sid in mod_overrides:
-        owner_map.pop(sid, None)
-        state_names.pop(sid, None)
-        prov_to_state = {p: s for p, s in prov_to_state.items() if s != sid}
 
     return owner_map, prov_to_state, state_names
 
@@ -410,14 +376,15 @@ def _render_political_map(
             progress_cb(idx, total)
         rgb_key = (int(r), int(g), int(b))
         pid = rgb_to_prov.get(rgb_key)
-        if pid is not None:
+        # skip province 0 (null province, needed by HOI4 but not a real area)
+        if pid is not None and pid != 0:
             # province is in definition.csv — if it belongs to a state
             # (prov_to_state) mark it as land; otherwise keep as ocean.
             sid = prov_to_state.get(pid)
             if sid is not None:
                 is_ocean[r, g, b] = False
-                # default land colour when state has no owner yet
-                lut[r, g, b] = [120, 100, 80]
+                # default grey when state has no country owner yet
+                lut[r, g, b] = [128, 128, 128]
                 tag = prov_to_owner_tag.get(pid)
                 if tag:
                     if tag in resolved_colors:
@@ -438,15 +405,16 @@ def _render_political_map(
         ocean_mask = is_ocean[arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]]
         result[ocean_mask] = ocean_texture[ocean_mask]
 
-    num_states = len(state_owner)
+    num_states = len(set(prov_to_state.values()) | set(state_owner.keys()))
+    num_unassigned = num_states - len(state_owner)
     num_countries = len(set(state_owner.values()))
 
-    return result, num_states, num_countries
+    return result, num_states, num_countries, num_unassigned
 
 
 class MapRenderWorker(QThread):
     progress = Signal(int, int)
-    finished = Signal(QImage, QImage, int, int)
+    finished = Signal(QImage, QImage, int, int, int)
     error = Signal(str)
 
     def __init__(
@@ -528,7 +496,7 @@ class MapRenderWorker(QThread):
             def _progress(current, total):
                 self.progress.emit(current, total)
 
-            result_arr, num_states, num_countries = _render_political_map(
+            result_arr, num_states, num_countries, num_unassigned = _render_political_map(
                 self.provinces_bmp_path,
                 rgb_to_prov,
                 prov_to_state,
@@ -562,7 +530,7 @@ class MapRenderWorker(QThread):
             clean_img = self._arr_to_qimage(result_arr)
             bordered_img = self._arr_to_qimage(bordered_arr)
 
-            self.finished.emit(clean_img, bordered_img, num_states, num_countries)
+            self.finished.emit(clean_img, bordered_img, num_states, num_countries, num_unassigned)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -1293,7 +1261,8 @@ class CountryLegendWidget(QWidget):
         self._layout.addStretch()
 
     def update_legend(
-        self, country_colors: dict[str, tuple[int, int, int]], detected_tags: set[str]
+        self, country_colors: dict[str, tuple[int, int, int]], detected_tags: set[str],
+        num_unassigned: int = 0,
     ) -> None:
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
@@ -1301,7 +1270,10 @@ class CountryLegendWidget(QWidget):
             if w:
                 w.deleteLater()
 
-        header = QLabel(f"Countries ({len(detected_tags)})")
+        header_text = f"Countries ({len(detected_tags)})"
+        if num_unassigned > 0:
+            header_text += f" + {num_unassigned} Unassigned"
+        header = QLabel(header_text)
         header.setStyleSheet(self._label_stylesheet)
         self._layout.insertWidget(0, header)
 
@@ -1326,6 +1298,24 @@ class CountryLegendWidget(QWidget):
             hl.addStretch()
 
             self._layout.insertWidget(i + 1, row)
+
+        # append "Unassigned" swatch when states have no owner
+        if num_unassigned > 0:
+            row = QWidget()
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(2, 2, 2, 2)
+            hl.setSpacing(6)
+            swatch = QLabel()
+            swatch.setFixedSize(20, 14)
+            swatch.setStyleSheet(
+                f"background-color: rgb(128,128,128); border: 1px solid {self._border_color}; border-radius: 3px;"
+            )
+            name = QLabel("Unassigned")
+            name.setStyleSheet(self._name_stylesheet)
+            hl.addWidget(swatch)
+            hl.addWidget(name)
+            hl.addStretch()
+            self._layout.insertWidget(len(sorted_tags) + 1, row)
 
 
 class WorldMapTab(QWidget):
@@ -1660,7 +1650,7 @@ class WorldMapTab(QWidget):
             self.progress.setValue(int(self._fake_progress))
 
     def _on_render_finished(
-        self, qimg_clean: QImage, qimg_bordered: QImage, num_states: int, num_countries: int
+        self, qimg_clean: QImage, qimg_bordered: QImage, num_states: int, num_countries: int, num_unassigned: int
     ) -> None:
         self._fake_timer.stop()
         self.progress.setValue(100)
@@ -1711,11 +1701,13 @@ class WorldMapTab(QWidget):
                 c.border_mask = self._worker._border_mask_result
 
         self.legend.update_legend(
-            _resolve_colors(self._country_colors, detected_tags), detected_tags
+            _resolve_colors(self._country_colors, detected_tags), detected_tags,
+            num_unassigned=num_unassigned,
         )
 
+        unassigned = f", {num_unassigned} unassigned" if num_unassigned > 0 else ""
         self.status_label.setText(
-            f"{num_states} states rendered, {num_countries} countries detected"
+            f"{num_states} states rendered, {num_countries} countries detected{unassigned}"
         )
 
         self.btn_refresh.setEnabled(True)

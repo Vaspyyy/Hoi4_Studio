@@ -959,6 +959,9 @@ def export_all_map_files(
 def export_states(territory_data: list[dict], mod_root: Path) -> None:
     """Generate history/states/*.txt from territory data.
 
+    Only land territories get state files — ocean provinces are handled
+    by strategic regions and supply areas instead.
+
     Each territory becomes a state.  Province IDs come from each
     territory's province_ids list.  State names use "STATE_N" format
     for localisation key lookups.
@@ -966,7 +969,11 @@ def export_states(territory_data: list[dict], mod_root: Path) -> None:
     state_dir = mod_root / "history" / "states"
     state_dir.mkdir(parents=True, exist_ok=True)
 
+    count = 0
     for t in territory_data:
+        ttype = t.get("territory_type", "land")
+        if ttype in ("ocean", "sea", "lake"):
+            continue  # ocean provinces → supply areas / strategic regions
         tid = t.get("territory_id", 0)
         provs = t.get("province_ids", [])
 
@@ -983,8 +990,9 @@ def export_states(territory_data: list[dict], mod_root: Path) -> None:
 
         filename = f"{tid}-state.txt"
         (state_dir / filename).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        count += 1
 
-    logger.info("Wrote %d state files to %s", len(territory_data), state_dir)
+    logger.info("Wrote %d state files to %s", count, state_dir)
 
 def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) -> None:
     """Create empty override files for vanilla country/history definitions.

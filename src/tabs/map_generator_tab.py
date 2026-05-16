@@ -7,6 +7,7 @@ from PIL import Image
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDialog,
     QFileDialog,
@@ -22,13 +23,7 @@ from PySide6.QtWidgets import (
 
 from ..mapgen import config as mg_config
 from ..mapgen.density_generator import create_equator_density, create_uniform_density
-from ..mapgen.hoi4_export import (
-    export_definition_csv,
-    export_province_definitions,
-    export_provinces_png,
-    export_territory_definitions,
-    export_territory_history,
-)
+from ..mapgen.hoi4_export import export_all_map_files
 from ..mapgen.province_generator import generate_provinces
 from ..mapgen.territory_generator import generate_territories
 from ..theme import AnimatedButton, create_card_widget, create_section_title
@@ -49,15 +44,16 @@ Any other color counts as land. Save as <b>PNG</b>.</p>
 will act as hard borders between territories. The generator respects these edges.</p>
 
 <p><b>4. (Optional) Add a density map</b> &mdash; brighter areas attract more territories/provinces.<br>
-Or use the <b>Uniform</b> / <b>Equator</b> buttons to auto-generate one.</p>
+Or use the <b>Auto: Uniform</b> / <b>Auto: Equator</b> buttons to auto-generate one.</p>
 
 <p><b>5. Generate Territories</b> &mdash; this divides your map into large regions.<br>
 Adjust the sliders and regenerate until the preview looks good.</p>
 
-<p><b>6. Generate Provinces</b> &mdash; subdivides each territory into HOI4-scale provinces.<br>
-You need provinces to export anything useful.</p>
+<p><b>6. Generate Provinces</b> &mdash; subdivides each territory into HOI4-scale provinces.</p>
 
-<p><b>7. Export All</b> &mdash; writes all files into your mod's <code>map/</code> folder.</p>
+<p><b>7. Export All to Mod</b> &mdash; writes the complete HOI4 map into your mod's<br>
+<code>map/</code> and <code>localisation/</code> folders. This includes definition.csv,<br>
+provinces.bmp, terrain, adjacencies, strategic regions, supply areas, and more.</p>
 
 <p><b>Tip:</b> Iterate fast! Generate territories, tweak sliders, regenerate.<br>
 Only generate provinces when you're happy with the territory layout.</p>
@@ -89,6 +85,33 @@ class MapGenWorker(QThread):
             self.error.emit(str(e))
 
 
+class ExportWorker(QThread):
+    """Runs the full map export in a background thread."""
+    progress_msg = Signal(str)
+    finished = Signal(dict)
+    error = Signal(str)
+
+    def __init__(self, province_data, province_image, territory_data, mod_root):
+        super().__init__()
+        self.province_data = province_data
+        self.province_image = province_image
+        self.territory_data = territory_data
+        self.mod_root = mod_root
+
+    def run(self) -> None:
+        try:
+            self.progress_msg.emit("Computing province adjacencies...")
+            results = export_all_map_files(
+                self.province_data,
+                self.province_image,
+                self.territory_data,
+                self.mod_root,
+            )
+            self.finished.emit(results)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class MapGeneratorTab(QWidget):
     def __init__(self, mw: MainWindow):
         super().__init__()
@@ -101,6 +124,7 @@ class MapGeneratorTab(QWidget):
         self._territory_result = None
         self._province_result = None
         self._worker: MapGenWorker | None = None
+        self._export_worker: ExportWorker | None = None
 
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
@@ -131,7 +155,15 @@ class MapGeneratorTab(QWidget):
         # progress bar
         self.progress = QProgressBar()
         self.progress.setVisible(False)
+        self.progress.setRange(0, 100)
         layout.addWidget(self.progress)
+
+        # status label (shows export progress messages)
+        self.status_label = QLabel("")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: #93c5fd; font-size: 12px; padding: 4px;")
+        self.status_label.setVisible(False)
+        layout.addWidget(self.status_label)
 
         # generate buttons
         gen_layout = QHBoxLayout()
@@ -175,11 +207,27 @@ class MapGeneratorTab(QWidget):
 
         # export
         layout.addWidget(create_section_title("4. Export to Mod", self))
+        export_desc = QLabel(
+            "Writes all HOI4 map files to your mod's map/ and localisation/ folders. "
+            "This includes provinces.bmp, definition.csv, adjacencies.csv, "
+            "strategic regions, supply areas, terrain, buildings, and more."
+        )
+        export_desc.setWordWrap(True)
+        export_desc.setStyleSheet("color: #888; font-size: 11px; padding: 4px 0;")
+        export_desc.setToolTip(
+            "Full export: 20+ files including definition.csv, provinces.bmp, "
+            "terrain.bmp, rivers.bmp, heightmap.bmp, trees.bmp, cities.bmp, "
+            "adjacencies.csv, strategicregions/*.txt, supplyareas/*.txt, "
+            "supply_nodes.txt, buildings.txt, positions.txt, default.map, "
+            "continent.txt, seasons.txt, and localisation placeholders."
+        )
+        layout.addWidget(export_desc)
+
         export_layout = QHBoxLayout()
         self.btn_export_all = AnimatedButton("Export All to Mod")
         self.btn_export_all.setToolTip(
-            "Write definition.csv, provinces.png, and all JSON definitions "
-            "into your mod's map/ folder in one click."
+            "Generate all HOI4 map files and write them to your mod in one operation. "
+            "Requires provinces to be generated first."
         )
         self.btn_export_all.clicked.connect(self._on_export_all)
         self.btn_export_all.setEnabled(False)
@@ -213,7 +261,7 @@ class MapGeneratorTab(QWidget):
             self._step_indicators.append(lbl)
             steps.addWidget(lbl, stretch=1)
             if i < len(step_names) - 1:
-                arrow = QLabel("→")
+                arrow = QLabel("\u2192")
                 arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 arrow.setStyleSheet("color: #555; font-size: 14px;")
                 arrow.setFixedWidth(20)
@@ -223,10 +271,6 @@ class MapGeneratorTab(QWidget):
 
     def _update_step_highlight(self, active: int) -> None:
         """Highlight the active step, dim completed/future steps."""
-        colors = [
-            ("#3b82f6", "#1e3a5f", "#60a5fa"),  # blue (active)
-            ("#22c55e", "#14532d", "#86efac"),  # green (done)
-        ]
         for i, lbl in enumerate(self._step_indicators):
             if i == active:
                 bg, border, text = "#2a4a6a", "#3b82f6", "#93c5fd"
@@ -581,7 +625,7 @@ class MapGeneratorTab(QWidget):
     def _show_quick_start(self) -> None:
         dlg = QDialog(self)
         dlg.setWindowTitle("Map Generator &mdash; Quick Start Guide")
-        dlg.setMinimumSize(600, 480)
+        dlg.setMinimumSize(620, 520)
         layout = QVBoxLayout(dlg)
         browser = QTextBrowser()
         browser.setOpenExternalLinks(True)
@@ -718,31 +762,61 @@ class MapGeneratorTab(QWidget):
         mod_root = self._require_mod_root()
         if mod_root is None or self._province_result is None:
             return
-        out_dir = mod_root / "map"
-        try:
-            export_definition_csv(self._province_result.metadata, out_dir / "definition.csv")
-            export_provinces_png(self._province_result.image, out_dir / "provinces.png")
-            if self._territory_result is not None:
-                export_territory_definitions(
-                    self._territory_result.metadata, out_dir / "territory_definitions.json"
-                )
-                export_territory_history(
-                    self._territory_result.metadata, out_dir / "territory_history.json"
-                )
-            if self._province_result is not None:
-                export_province_definitions(
-                    self._province_result.metadata, out_dir / "province_definitions.json"
-                )
-            self._update_step_highlight(3)
-            self.mw.log_panel.log(
-                "Exported all map files to " + str(out_dir), "success"
-            )
-            QMessageBox.information(
-                self, "Export Complete",
-                f"All map files written to:\n{out_dir}\n\n"
-                "Files: definition.csv, provinces.png, territory_definitions.json, "
-                "province_definitions.json, territory_history.json",
-            )
-        except Exception as e:
-            self.mw.log_panel.log(str(e), "error")
-            QMessageBox.critical(self, "Export Error", str(e))
+
+        self.btn_export_all.setEnabled(False)
+        self.btn_gen_terr.setEnabled(False)
+        self.btn_gen_prov.setEnabled(False)
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)  # indeterminate
+        self.status_label.setText("Exporting map files...")
+        self.status_label.setVisible(True)
+        self._update_step_highlight(3)
+
+        QApplication.processEvents()
+
+        self._export_worker = ExportWorker(
+            self._province_result.metadata,
+            self._province_result.image,
+            self._territory_result.metadata,
+            mod_root,
+        )
+        self._export_worker.progress_msg.connect(self._on_export_progress)
+        self._export_worker.finished.connect(self._on_export_done)
+        self._export_worker.error.connect(self._on_export_error)
+        self._export_worker.start()
+
+    def _on_export_progress(self, msg: str) -> None:
+        self.status_label.setText(msg)
+        self.mw.log_panel.log(msg, "info")
+        QApplication.processEvents()
+
+    def _on_export_done(self, results: dict[str, str]) -> None:
+        self.progress.setVisible(False)
+        self.status_label.setVisible(False)
+        self.btn_export_all.setEnabled(True)
+        self.btn_gen_terr.setEnabled(True)
+        self.btn_gen_prov.setEnabled(True)
+
+        mod_root = self.mw.paths.mod_root if self.mw.paths else "?"
+        summary = f"Exported {len(results)} files to {mod_root}"
+        self.mw.log_panel.log(summary, "success")
+
+        QMessageBox.information(
+            self, "Export Complete",
+            f"Map exported to your mod folder.\n\n"
+            f"Files written: {len(results)}\n"
+            f"Location: {mod_root}/map/\n\n"
+            f"Includes: provinces.bmp, definition.csv, terrain.bmp, "
+            f"adjacencies.csv, strategic regions, supply areas, "
+            f"buildings, localisation placeholders, and more.\n\n"
+            f"Your map is now ready to load in Hearts of Iron IV.",
+        )
+
+    def _on_export_error(self, msg: str) -> None:
+        self.progress.setVisible(False)
+        self.status_label.setVisible(False)
+        self.btn_export_all.setEnabled(True)
+        self.btn_gen_terr.setEnabled(True)
+        self.btn_gen_prov.setEnabled(True)
+        self.mw.log_panel.log(f"Export error: {msg}", "error")
+        QMessageBox.critical(self, "Export Failed", str(msg))

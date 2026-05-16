@@ -28,6 +28,8 @@ from ..mapgen.hoi4_export import export_all_map_files
 from ..mapgen.province_generator import generate_provinces
 from ..mapgen.territory_generator import generate_territories
 from ..theme import AnimatedButton, create_card_widget, create_section_title
+from ..countries import generate_mod_descriptor
+from ..settings import save_settings
 
 if TYPE_CHECKING:
     from ..main import MainWindow
@@ -804,9 +806,26 @@ class MapGeneratorTab(QWidget):
         self.btn_gen_terr.setEnabled(True)
         self.btn_gen_prov.setEnabled(True)
 
-        mod_root = self.mw.paths.mod_root if self.mw.paths else "?"
+        mod_root = self.mw.paths.mod_root if self.mw.paths else Path("?")
         summary = f"Exported {len(results)} files to {mod_root}"
         self.mw.log_panel.log(summary, "success")
+
+        # auto-generate .mod descriptor for the Paradox launcher
+        mod_msg = ""
+        if self.mw.paths:
+            try:
+                mod_name = mod_root.name
+                desc_path = generate_mod_descriptor(
+                    mod_root,
+                    self.mw.paths.hoi4_user_mods,
+                    mod_name,
+                    hoi4_install=self.mw.paths.hoi4_install,
+                )
+                mod_msg = f"\n\n.mod descriptor: {desc_path}"
+                self.mw.log_panel.log(f"Generated .mod descriptor: {desc_path}", "success")
+            except Exception as e:
+                self.mw.log_panel.log(f"Could not generate .mod file: {e}", "warning")
+                mod_msg = f"\n\n⚠ .mod file not generated: {e}"
 
         QMessageBox.information(
             self, "Export Complete",
@@ -815,8 +834,9 @@ class MapGeneratorTab(QWidget):
             f"Location: {mod_root}/map/\n\n"
             f"Includes: provinces.bmp, definition.csv, terrain.bmp, "
             f"adjacencies.csv, strategic regions, supply areas, "
-            f"buildings, localisation placeholders, and more.\n\n"
-            f"Your map is now ready to load in Hearts of Iron IV.",
+            f"buildings, localisation placeholders, and more."
+            f"{mod_msg}\n\n"
+            f"Enable the mod in the Paradox launcher and restart HOI4.",
         )
 
     def _on_export_error(self, msg: str) -> None:

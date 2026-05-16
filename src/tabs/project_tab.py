@@ -208,7 +208,10 @@ class ProjectTab(QWidget):
             return
         mod_name = self.mw.paths.mod_root.name
         desc = generate_mod_descriptor(
-            self.mw.paths.mod_root, self.mw.paths.hoi4_user_mods, mod_name
+            self.mw.paths.mod_root,
+            self.mw.paths.hoi4_user_mods,
+            mod_name,
+            hoi4_install=self.mw.paths.hoi4_install,
         )
         self.mw.log_panel.log(f"Generated .mod descriptor: {desc}", "success")
         QMessageBox.information(self, "Done", f".mod file written to {desc}")

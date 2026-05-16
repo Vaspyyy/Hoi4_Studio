@@ -4,6 +4,7 @@ HOI4 Modding Studio - Country Creation
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Tuple, TYPE_CHECKING
@@ -201,21 +202,96 @@ def write_character_file(
 
 
 def generate_mod_descriptor(
-    mod_root: Path, user_mods_dir: Path, mod_name: str, tags: list[str] | None = None
+    mod_root: Path, user_mods_dir: Path, mod_name: str,
+    tags: list[str] | None = None,
+    replace_paths: list[str] | None = None,
+    hoi4_install: Path | None = None,
 ) -> Path:
+    """
+    Write a .mod descriptor file for the Paradox launcher.
+
+    Returns the path to the written .mod file.
+    """
     path_str = str(mod_root.resolve()).replace("\\", "/")
+
+    # detect the real game data mod directory (launcher reads .mod files from here)
+    game_data_mods = _detect_game_data_mods_dir(hoi4_install)
+    if game_data_mods:
+        user_mods_dir = game_data_mods
+
     desc = user_mods_dir / f"{mod_name}.mod"
     desc.parent.mkdir(parents=True, exist_ok=True)
 
-    content = f'name = "{mod_name}"\npath = "{path_str}"\ntags={{'
-    if tags:
-        content += " ".join(f'"{t}"' for t in tags)
-    else:
-        content += '"Alternative" "Gameplay" "National Focuses"'
-    content += "}\n"
-    # TODO: supported_version="1.14.*" hardcoded — make configurable or derive
-    # from the HOI4 install's launcher-settings.json.
-    content += 'supported_version="1.14.*"\npicture="thumbnail.png"\n'
+    # supported version from HOI4 install's launcher-settings.json
+    supported_version = "1.14.*"
+    if hoi4_install:
+        supported_version = _detect_game_version(hoi4_install)
 
-    desc.write_text(content, encoding="utf-8", errors="ignore")
+    # tags format matching vanilla mods (no spaces around =)
+    tag_list = tags if tags else ["Map", "Alternative History"]
+    tag_block = "\n\t".join(f'"{t}"' for t in tag_list)
+
+    blocks = [
+        f'version="1.0"',
+        f'tags={{\n\t{tag_block}\n}}',
+        f'name="{mod_name}"',
+        f'supported_version="{supported_version}"',
+        f'path="{path_str}"',
+    ]
+
+    # map mods must replace base game paths to avoid conflicts
+    if replace_paths is None:
+        replace_paths = [
+            "map/strategicregions",
+            "map/supplyareas",
+        ]
+    for rp in replace_paths:
+        blocks.append(f'replace_path="{rp}"')
+
+    content = "\n".join(blocks) + "\n"
+    desc.write_text(content, encoding="utf-8")
+
+    # also write descriptor.mod inside the mod directory (launcher fallback)
+    inner = mod_root / "descriptor.mod"
+    inner.write_text(content, encoding="utf-8")
+
     return desc
+
+
+def _detect_game_data_mods_dir(hoi4_install: Path | None) -> Path | None:
+    """Detect the real game data mod directory from launcher-settings.json."""
+    if hoi4_install is None:
+        return None
+    ls = hoi4_install / "launcher-settings.json"
+    if not ls.exists():
+        return None
+    try:
+        data = json.loads(ls.read_text(encoding="utf-8"))
+        gdp = data.get("gameDataPath", "")
+        # resolve $LINUX_DATA_HOME -> ~/.local/share
+        gdp = gdp.replace("$LINUX_DATA_HOME", str(Path.home() / ".local" / "share"))
+        gdp = gdp.replace("$", str(Path.home()))
+        mods_dir = Path(gdp) / "mod"
+        if mods_dir.exists():
+            return mods_dir
+    except Exception:
+        pass
+    return None
+
+
+def _detect_game_version(hoi4_install: Path) -> str:
+    """Extract game version from launcher-settings.json, e.g. '1.18.1.0'."""
+    ls = hoi4_install / "launcher-settings.json"
+    if not ls.exists():
+        return "1.14.*"
+    try:
+        data = json.loads(ls.read_text(encoding="utf-8"))
+        raw = data.get("rawVersion", "")
+        if raw:
+            # convert '1.18.1.0' to '1.18.*'
+            parts = raw.split(".")
+            if len(parts) >= 2:
+                return f"{parts[0]}.{parts[1]}.*"
+        return "1.14.*"
+    except Exception:
+        return "1.14.*"

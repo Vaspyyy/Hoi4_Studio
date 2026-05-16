@@ -71,7 +71,16 @@ def load_mod_tags(mod_root: Path) -> list[str]:
 
 def load_all_tags(hoi4_install: Optional[Path], mod_root: Optional[Path]) -> list[str]:
     tags: set[str] = set()
-    if hoi4_install:
+
+    # If the mod overrides country_tags, skip vanilla — otherwise
+    # vanilla tags leak through even though the mod blanks them.
+    mod_overrides_tags = (
+        mod_root is not None
+        and (mod_root / "common" / "country_tags").is_dir()
+        and any((mod_root / "common" / "country_tags").glob("*.txt"))
+    )
+
+    if hoi4_install and not mod_overrides_tags:
         tags.update(load_vanilla_tags(hoi4_install))
     if mod_root:
         tags.update(load_mod_tags(mod_root))

@@ -939,10 +939,11 @@ def export_all_map_files(
     export_localisation_placeholders(province_data, territory_data, loc_dir)
     results["localisation/"] = "3 yml files"
 
-    # create empty history and country-tag files so vanilla content
-    # doesn't leak into our custom map (no allies/axis countries showing)
-    _blank_vanilla_overrides(mod_root, hoi4_install)
-    results["history+tags/"] = "vanilla overrides written"
+    # Directories that replace_path covers — HOI4 skips vanilla
+    # entirely for these, so no blank override files needed.
+    for d in ("history/countries", "history/units",
+              "common/country_tags", "common/countries"):
+        (mod_root / d).mkdir(parents=True, exist_ok=True)
 
     # generate state history files from territory data so the viewer
     # (and game) can render provinces with their state assignments
@@ -993,74 +994,6 @@ def export_states(territory_data: list[dict], mod_root: Path) -> None:
         count += 1
 
     logger.info("Wrote %d state files to %s", count, state_dir)
-
-def _blank_vanilla_overrides(mod_root: Path, hoi4_install: str | Path | None) -> None:
-    """Create empty override files for vanilla country/history definitions.
-
-    HOI4 loads base-game files first, then overlays mod files with matching
-    names.  To get a clean-slate map with zero countries we create empty
-    versions of vanilla country-tag and country-history files so the game
-    sees no tags.
-
-    State files are NOT blanked here — they are generated from territory
-    data by export_states() instead.
-    """
-    if hoi4_install is None:
-        for d in ("history/countries", "history/units",
-                  "common/country_tags", "common/countries"):
-            (mod_root / d).mkdir(parents=True, exist_ok=True)
-        return
-
-    base = Path(hoi4_install)
-
-    # ---- 1. blank country-tag definitions ----
-    #    vanilla: common/country_tags/00_countries.txt defines all 90+ tags
-    #    empty copy → no country tags at all → countries (0)
-    tag_src = base / "common" / "country_tags"
-    tag_dst = mod_root / "common" / "country_tags"
-    if tag_src.is_dir():
-        tag_dst.mkdir(parents=True, exist_ok=True)
-        override_text = "# HOI4 Studio override\n"
-        for src_file in tag_src.glob("*.txt"):
-            dst_file = tag_dst / src_file.name
-            # Always write (or re-write) the blank override —
-            # write_text can produce 0-byte files on some edge cases
-            # (interrupted write, filesystem race). Re-writing the
-            # 23-byte comment is idempotent and harmless.
-            if not dst_file.exists() or dst_file.stat().st_size < len(override_text):
-                dst_file.write_text(override_text, encoding="utf-8")
-
-    # ---- 2. blank country common definitions ----
-    #    vanilla: common/countries/*.txt (color, graphical culture, etc.)
-    country_src = base / "common" / "countries"
-    country_dst = mod_root / "common" / "countries"
-    if country_src.is_dir():
-        country_dst.mkdir(parents=True, exist_ok=True)
-        for src_file in country_src.glob("*.txt"):
-            dst_file = country_dst / src_file.name
-            if not dst_file.exists() or dst_file.stat().st_size < len(override_text):
-                dst_file.write_text(override_text, encoding="utf-8")
-
-    # ---- 3. blank country history ----
-    hist_src = base / "history" / "countries"
-    hist_dst = mod_root / "history" / "countries"
-    hist_dst.mkdir(parents=True, exist_ok=True)
-    if hist_src.is_dir():
-        for src_file in hist_src.glob("*.txt"):
-            dst_file = hist_dst / src_file.name
-            if not dst_file.exists() or dst_file.stat().st_size < len(override_text):
-                dst_file.write_text(override_text, encoding="utf-8")
-
-    # ---- 4. blank unit history ----
-    unit_src = base / "history" / "units"
-    unit_dst = mod_root / "history" / "units"
-    unit_dst.mkdir(parents=True, exist_ok=True)
-    if unit_src.is_dir():
-        for src_file in unit_src.glob("*.txt"):
-            dst_file = unit_dst / src_file.name
-            if not dst_file.exists() or dst_file.stat().st_size < len(override_text):
-                dst_file.write_text(override_text, encoding="utf-8")
-
 
 # ---------------------------------------------------------------------------
 # legacy exports (kept for backward compat)

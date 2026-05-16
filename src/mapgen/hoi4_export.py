@@ -940,10 +940,34 @@ def export_all_map_files(
     results["localisation/"] = "3 yml files"
 
     # Directories that replace_path covers — HOI4 skips vanilla
-    # entirely for these, so no blank override files needed.
+    # entirely for these, so no individual country/history override
+    # files needed (that was generating 1,400+ empty txt files).
     for d in ("history/countries", "history/units",
-              "common/country_tags", "common/countries"):
+              "common/countries"):
         (mod_root / d).mkdir(parents=True, exist_ok=True)
+
+    # common/country_tags/ is special — we WANT blank overrides for
+    # vanilla's 00_countries.txt + zz_dynamic_countries.txt so no
+    # base-game tags sneak in.  replace_path handles directory
+    # suppression but blank tag files are a safety net the user
+    # expects to see on disk.  Only 2 files, not hundreds.
+    tag_dst = mod_root / "common/country_tags"
+    tag_dst.mkdir(parents=True, exist_ok=True)
+    if hoi4_install is not None:
+        tag_src = Path(hoi4_install) / "common" / "country_tags"
+        if tag_src.is_dir():
+            override = "# HOI4 Studio override\n"
+            for src_file in tag_src.glob("*.txt"):
+                dst_file = tag_dst / src_file.name
+                # only write if missing or smaller than expected
+                if not dst_file.exists() or dst_file.stat().st_size < len(override):
+                    dst_file.write_text(override, encoding="utf-8")
+    else:
+        # fallback: at least ensure the two standard files exist
+        for name in ("00_countries.txt", "zz_dynamic_countries.txt"):
+            f = tag_dst / name
+            if not f.exists():
+                f.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
     # generate state history files from territory data so the viewer
     # (and game) can render provinces with their state assignments

@@ -101,22 +101,55 @@ continents = {
 }
 """
 
-ADJACENCY_RULES_TXT = """\
-adjacency_rule = {
-\tname = "CANAL"
-\tis_water_connection = yes
-\ticon = 7
-\trequired_provinces = { 0 }
-\tallow_border_countries_to_have = yes
-}
-"""
-
 SEASONS_TXT = """\
-season = {
-\ttype = winter
-\tstart_season = 1.11
-\tend_season = 1.3
+winter = {
+\tstart_date=00.12.01
+\tend_date=00.02.10
+\thsv_north=          { 0 0.1 1 }
+\tcolorbalance_north= { 0.9 0.9 1 }
+\thsv_center=         { 0.0 1.0 1.0 }
+\tcolorbalance_center= { 1.0 1.0 1.0 }
+\thsv_south=          { 0.0 1.0 1.0 }
+\tcolorbalance_south= { 1.0 1.0 1.0 }
 }
+spring = {
+\tstart_date=00.03.10
+\tend_date=00.04.22
+\thsv_north=          { 0 0.1 1 }
+\tcolorbalance_north= { 0.9 0.9 1 }
+\thsv_center=         { 0.0 1.0 1.0 }
+\tcolorbalance_center= { 1.0 1.0 1.0 }
+\thsv_south=          { 0.0 1.0 1.0 }
+\tcolorbalance_south= { 1.0 1.0 1.0 }
+}
+summer = {
+\tstart_date=00.05.20
+\tend_date=00.09.10
+\thsv_north=          { 0 0.1 1 }
+\tcolorbalance_north= { 0.9 0.9 1 }
+\thsv_center=         { 0.0 1.0 1.0 }
+\tcolorbalance_center= { 1.0 1.0 1.0 }
+\thsv_south=          { 0.0 1.0 1.0 }
+\tcolorbalance_south= { 1.0 1.0 1.0 }
+}
+autumn = {
+\tstart_date=00.10.10
+\tend_date=00.10.31
+\thsv_north=          { 0 0.1 1 }
+\tcolorbalance_north= { 0.9 0.9 1 }
+\thsv_center=         { 0.0 1.0 1.0 }
+\tcolorbalance_center= { 1.0 1.0 1.0 }
+\thsv_south=          { 0.0 1.0 1.0 }
+\tcolorbalance_south= { 1.0 1.0 1.0 }
+}
+tree_winter = { start_date=00.11.15 end_date=00.12.01 }
+tree_winter2 = { start_date=00.12.20 end_date=00.01.20 }
+tree_spring = { start_date=00.02.20 end_date=00.03.01 }
+tree_spring2 = { start_date=00.03.20 end_date=00.04.20 }
+tree_summer = { start_date=00.05.20 end_date=00.06.01 }
+tree_summer2 = { start_date=00.06.20 end_date=00.09.10 }
+tree_autumn = { start_date=00.10.01 end_date=00.10.10 }
+tree_autumn2 = { start_date=00.10.25 end_date=00.11.01 }
 """
 
 # generic temperate climate for all strategic regions
@@ -292,7 +325,9 @@ def export_definition_csv(
     try:
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f, delimiter=";")
-            w.writerow(["province", "red", "green", "blue", "type", "is_coastal", "terrain", "continent"])
+            # NOTE: vanilla definition.csv has NO header row; first line is province 0
+            # province 0 (null province) - required by HOI4, always has RGB(0,0,0)
+            w.writerow([0, 0, 0, 0, "land", "false", "unknown", 0])
             for d in province_data:
                 pid = d["province_id"]
                 ptype = d.get("province_type", "land")
@@ -334,7 +369,8 @@ def export_continent_txt(path: str | Path) -> None:
 
 
 def export_adjacency_rules_txt(path: str | Path) -> None:
-    _write_text(Path(path), ADJACENCY_RULES_TXT)
+    """Write adjacency_rules.txt - no canal/strait rules defined, game loads fine without them."""
+    _write_text(Path(path), "# No custom adjacency rules defined.\n# Adjacent provinces use default land movement.\n")
 
 
 def export_seasons_txt(path: str | Path) -> None:
@@ -346,14 +382,27 @@ def export_positions_txt(path: str | Path) -> None:
     _write_text(Path(path), "")
 
 
-def export_weatherpositions_txt(path: str | Path) -> None:
-    """Default single weather position at map center."""
-    _write_text(Path(path), "1 67\n1 101\n1 121\n1 122\n1 158\n")
+def export_weatherpositions_txt(
+    path: str | Path,
+    territory_data: list[dict] | None = None,
+) -> None:
+    """Write weatherpositions.txt with one position per territory at its center."""
+    if territory_data is None:
+        _write_text(Path(path), "1;0.00;0.00;0.00;small\n")
+        return
+    lines = []
+    for t in territory_data:
+        tid = t["territory_id"]
+        x = round(t.get("x", 0), 2)
+        y = round(t.get("y", 0), 2)
+        size = "small" if tid > 10 else "medium"
+        lines.append(f"{tid};{x:.2f};0.00;{y:.2f};{size}")
+    _write_text(Path(path), "\n".join(lines) + "\n")
 
 
 def export_ambient_object_txt(path: str | Path) -> None:
-    """Minimal ambient object file."""
-    _write_text(Path(path), "types = {\n}\n")
+    """Minimal ambient object file (valid Paradox script, no objects)."""
+    _write_text(Path(path), "# no ambient objects defined\ntype={\n\ttype=\"frame_border_entity\"\n\tuse_animation=no\n\tscale=100.000000\n\talways_visible=yes\n\tobject={\n\t\tname=\"frame_border_entity_top\"\n\t\tposition={ 0 0 2190 }\n\t\trotation={ 0 0 0 }\n\t}\n}\n")
 
 
 def export_railways_txt(path: str | Path) -> None:
@@ -369,8 +418,8 @@ def export_colors_txt(path: str | Path) -> None:
 
 
 def export_cities_txt(path: str | Path) -> None:
-    """Minimal cities.txt - empty definitions."""
-    _write_text(Path(path), "definitions = {\n}\n")
+    """Minimal cities.txt - no city groups defined (all land is plains/rural)."""
+    _write_text(Path(path), "types_source = \"map/cities.bmp\"\npixel_step_x = 4\npixel_step_y = 4\n# no city groups defined - map is all rural/plains\n")
 
 
 # ---------------------------------------------------------------------------
@@ -506,8 +555,7 @@ def _weather_block() -> str:
         lines.append(f"\t\t\train_light={p[5]:.3f}")
         lines.append(f"\t\t\train_heavy={p[6]:.3f}")
         lines.append(f"\t\t\tsnow={p[7]:.3f}")
-        if p[8] > 0:
-            lines.append(f"\t\t\tblizzard={p[8]:.3f}")
+        lines.append(f"\t\t\tblizzard={p[8]:.3f}")
         lines.append(f"\t\t\tarctic_water={p[9]:.3f}")
         lines.append(f"\t\t\tmud={p[10]:.3f}")
         lines.append(f"\t\t\tsandstorm={p[11]:.3f}")
@@ -608,23 +656,30 @@ supply_area={{
 
 def export_supply_nodes(
     province_data: list[dict],
+    territory_data: list[dict],
     path: str | Path,
 ) -> None:
     """
-    Write supply_nodes.txt with one node per province at its center.
-    Format: province_id node_type x y
+    Write supply_nodes.txt.
+    Format: province_id node_value (space-separated, two integers per line).
+    Territory capitals get higher supply values; regular provinces get base value.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # find territory center provinces for higher supply values
+    territory_centers: set[int] = set()
+    for t in territory_data:
+        pids = t.get("province_ids", [])
+        if pids:
+            territory_centers.add(pids[0])
     try:
         with open(path, "w", encoding="utf-8") as f:
             for d in province_data:
                 if d.get("province_type") == "ocean":
-                    continue  # no supply nodes in ocean
+                    continue
                 pid = d["province_id"]
-                x = round(d["x"], 1)
-                y = round(d["y"], 1)
-                f.write(f"{pid} 1 {x} {y}\n")
+                value = 15 if pid in territory_centers else 5
+                f.write(f"{pid} {value}\n")
     except OSError as e:
         logger.error("Failed to write supply_nodes.txt %s: %s", path, e)
 
@@ -803,7 +858,7 @@ def export_all_map_files(
     results["seasons.txt"] = "ok"
 
     # weatherpositions.txt
-    export_weatherpositions_txt(map_dir / "weatherpositions.txt")
+    export_weatherpositions_txt(map_dir / "weatherpositions.txt", territory_data)
     results["weatherpositions.txt"] = "ok"
 
     # ambient_object.txt
@@ -837,7 +892,7 @@ def export_all_map_files(
     results["supplyareas/"] = f"{len(territory_data)} areas"
 
     # supply nodes
-    export_supply_nodes(province_data, map_dir / "supply_nodes.txt")
+    export_supply_nodes(province_data, territory_data, map_dir / "supply_nodes.txt")
     results["supply_nodes.txt"] = "ok"
 
     # buildings

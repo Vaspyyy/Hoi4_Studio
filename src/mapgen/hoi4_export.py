@@ -938,7 +938,26 @@ def export_all_map_files(
     export_localisation_placeholders(province_data, territory_data, loc_dir)
     results["localisation/"] = "3 yml files"
 
+    # create empty history dirs so vanilla history doesn't leak into our custom map
+    _ensure_empty_history_dirs(mod_root)
+    results["history/"] = "empty countries, states, units"
+
     return results
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _ensure_empty_history_dirs(mod_root: Path) -> None:
+    """Create empty history/ directories so vanilla history is fully replaced.
+
+    Without these empty dirs and replace_path in the .mod descriptor, the
+    base game's history/states files assign vanilla countries to provinces
+    on the custom map, producing garbled ownership.
+    """
+    for d in ("history/countries", "history/states", "history/units"):
+        (mod_root / d).mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------

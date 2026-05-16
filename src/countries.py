@@ -210,11 +210,14 @@ def generate_mod_descriptor(
     """
     Write a .mod descriptor file for the Paradox launcher.
 
+    If tags and replace_paths are left as None, the mod_root directory is
+    scanned and matching entries are auto-detected from the actual content.
+
     Returns the path to the written .mod file.
     """
     path_str = str(mod_root.resolve()).replace("\\", "/")
 
-    # detect the real game data mod directory (launcher reads .mod files from here)
+    # detect the real game data mod directory
     game_data_mods = _detect_game_data_mods_dir(hoi4_install)
     if game_data_mods:
         user_mods_dir = game_data_mods
@@ -222,14 +225,17 @@ def generate_mod_descriptor(
     desc = user_mods_dir / f"{mod_name}.mod"
     desc.parent.mkdir(parents=True, exist_ok=True)
 
-    # supported version from HOI4 install's launcher-settings.json
+    # auto-detect from mod content if not provided
+    if tags is None:
+        tags = _scan_mod_for_tags(mod_root)
+    if replace_paths is None:
+        replace_paths = _scan_mod_for_replace_paths(mod_root)
+
     supported_version = "1.14.*"
     if hoi4_install:
         supported_version = _detect_game_version(hoi4_install)
 
-    # tags format matching vanilla mods (no spaces around =)
-    tag_list = tags if tags else ["Map", "Alternative History"]
-    tag_block = "\n\t".join(f'"{t}"' for t in tag_list)
+    tag_block = "\n\t".join(f'"{t}"' for t in tags)
 
     blocks = [
         f'version="1.0"',
@@ -238,20 +244,12 @@ def generate_mod_descriptor(
         f'supported_version="{supported_version}"',
         f'path="{path_str}"',
     ]
-
-    # map mods must replace base game paths to avoid conflicts
-    if replace_paths is None:
-        replace_paths = [
-            "map/strategicregions",
-            "map/supplyareas",
-        ]
     for rp in replace_paths:
         blocks.append(f'replace_path="{rp}"')
 
     content = "\n".join(blocks) + "\n"
     desc.write_text(content, encoding="utf-8")
 
-    # also write descriptor.mod inside the mod directory (launcher fallback)
     inner = mod_root / "descriptor.mod"
     inner.write_text(content, encoding="utf-8")
 
@@ -288,10 +286,77 @@ def _detect_game_version(hoi4_install: Path) -> str:
         data = json.loads(ls.read_text(encoding="utf-8"))
         raw = data.get("rawVersion", "")
         if raw:
-            # convert '1.18.1.0' to '1.18.*'
             parts = raw.split(".")
             if len(parts) >= 2:
                 return f"{parts[0]}.{parts[1]}.*"
         return "1.14.*"
     except Exception:
         return "1.14.*"
+
+
+def _has_content(path: Path) -> bool:
+    """True if path exists (even if empty — an empty dir still triggers replace_path)."""
+    return path.is_dir()
+
+
+def _has_files(path: Path) -> bool:
+    """True if path has at least one file (recursively). Used for tag detection."""
+    if not path.is_dir():
+        return False
+    return any(f.is_file() for f in path.rglob("*"))
+
+
+# mapping of relative dir paths -> launcher tags
+_TAG_MAP: dict[str, str] = {
+    "map": "Map",
+    "common/national_focus": "National Focuses",
+    "common/technologies": "Technologies",
+    "common/ideas": "Ideas",
+    "common/decisions": "Decisions",
+    "events": "Events",
+    "history/units": "Military",
+    "gfx": "Graphics",
+    "music": "Sound",
+    "tutorial": "Tutorial",
+}
+
+# dirs that should trigger a replace_path when they have content
+# (history/*, map/strategicregions, map/supplyareas, common/*, events)
+_REPLACE_PATH_DIRS: set[str] = {
+    "history/countries", "history/states", "history/units", "history/general",
+    "map/strategicregions", "map/supplyareas",
+    "events",
+    "common/abilities", "common/ai_areas", "common/ai_focuses",
+    "common/ai_peace", "common/ai_strategy", "common/ai_strategy_plans",
+    "common/ai_templates", "common/ai_faction_theaters", "common/ai_navy",
+    "common/autonomous_states", "common/bookmarks",
+    "common/countries", "common/country_tags",
+    "common/decisions", "common/decisions/categories",
+    "common/dynamic_modifiers", "common/factions/templates",
+    "common/intelligence_agencies", "common/intelligence_agency_upgrades",
+    "common/military_industrial_organization/organizations",
+    "common/national_focus", "common/on_actions",
+    "common/operation_phases", "common/operations",
+    "common/peace_conference/ai_peace", "common/raids",
+    "common/script_constants", "common/scripted_effects",
+    "common/scripted_guis", "common/scripted_localisation",
+    "common/scripted_triggers", "common/unit_leader", "common/units",
+}
+
+
+def _scan_mod_for_tags(mod_root: Path) -> list[str]:
+    """Scan mod directory and return launcher tags for content that exists."""
+    found: list[str] = []
+    for rel, tag in sorted(_TAG_MAP.items()):
+        if _has_files(mod_root / rel):
+            found.append(tag)
+    return found if found else ["Map"]
+
+
+def _scan_mod_for_replace_paths(mod_root: Path) -> list[str]:
+    """Scan mod directory and return replace_path entries for directories with content."""
+    found: list[str] = []
+    for rp in sorted(_REPLACE_PATH_DIRS):
+        if _has_content(mod_root / rp):
+            found.append(rp)
+    return found

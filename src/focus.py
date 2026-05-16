@@ -4,9 +4,12 @@ HOI4 Modding Studio - Focus Tree System
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from .parser import extract_braced_block
+
+logger = logging.getLogger("hoi4_studio.focus")
 
 
 FOCUS_ID_RE = re.compile(r"\bid\s*=\s*([A-Za-z0-9_\-%]+)")
@@ -110,9 +113,10 @@ def export_focus_tree(mod_root: Path, tree_id: str, tag: str, nodes: list[dict])
     out += "}\n"
     p = mod_root / f"common/national_focus/{tag}_focus.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
-    # TODO: wrap file writes in try/except for disk-full or permission errors;
-    # currently failing silently — same issue in events.py and mapgen exporters.
-    p.write_text(out, encoding="utf-8")
+    try:
+        p.write_text(out, encoding="utf-8")
+    except OSError as e:
+        logger.error("Failed to write focus file %s: %s", p, e)
 
 
 def export_focus_localisation(mod_root: Path, tag: str, nodes: list[dict]) -> None:

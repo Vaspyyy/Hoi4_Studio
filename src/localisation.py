@@ -14,8 +14,6 @@ YML_ENTRY_RE = re.compile(r'^\s*([^:#\s]+)\s*:\s*(?:\d+\s*)?\s*"(.*)"\s*$')
 
 
 def append_localisation(path: Path, entries: dict[str, str]) -> None:
-    # TODO: write to temp file and rename for atomicity — if the app crashes
-    # mid-write the localisation file is corrupted with no backup.
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_text("l_english:\n", encoding="utf-8-sig")
@@ -41,7 +39,9 @@ def append_localisation(path: Path, entries: dict[str, str]) -> None:
     out = "".join(new_lines).rstrip() + "\n"
     for k in sorted(entries):
         out += f' {k}:0 "{entries[k]}"\n'
-    path.write_text(out, encoding="utf-8-sig")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(out, encoding="utf-8-sig")
+    tmp.replace(path)
 
 
 def delete_localisation_keys(path: Path, keys_to_delete: set[str]) -> None:

@@ -12,9 +12,6 @@ from typing import Optional
 from .parser import parse_pdx, serialize_pdx, PdxNode
 
 
-# TODO: _state_file_cache never invalidated after write_state_properties
-# — after writing a state file, cached paths become stale. Call
-# _clear_state_file_cache() after any state file mutation.
 _state_file_cache: dict[str, Optional[Path]] = {}
 
 
@@ -335,3 +332,4 @@ def write_state_properties(state_file: Path, props: dict) -> None:
             history.add_child(vp_block)
 
     state_file.write_text(serialize_pdx(root), encoding="utf-8")
+    _clear_state_file_cache()

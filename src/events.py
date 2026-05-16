@@ -4,8 +4,11 @@ HOI4 Modding Studio - Event System
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from .localisation import append_localisation
+
+logger = logging.getLogger("hoi4_studio.events")
 
 
 def generate_event_file(mod_root: Path, namespace: str, events: list[dict]) -> None:
@@ -66,9 +69,10 @@ def generate_event_file(mod_root: Path, namespace: str, events: list[dict]) -> N
 
     p = mod_root / f"events/{namespace}_events.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
-    # TODO: wrap file writes in try/except for disk-full or permission errors;
-    # same issue in generate_event_localisation, focus.py, and mapgen exporters.
-    p.write_text(out, encoding="utf-8")
+    try:
+        p.write_text(out, encoding="utf-8")
+    except OSError as e:
+        logger.error("Failed to write event file %s: %s", p, e)
 
 
 def generate_event_localisation(mod_root: Path, namespace: str, events: list[dict]) -> None:

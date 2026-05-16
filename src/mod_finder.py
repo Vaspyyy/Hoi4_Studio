@@ -29,8 +29,6 @@ def find_mods_in_user_mod_folder(user_mods_dir: Path):
         return mods
     for f in sorted(user_mods_dir.glob("*.mod")):
         try:
-            # TODO: Path(path) from .mod descriptor is not validated for traversal
-            # or null bytes — sanitize before returning to consumers.
             txt = f.read_text(encoding="utf-8", errors="ignore")
             path = None
             for line in txt.splitlines():
@@ -38,8 +36,19 @@ def find_mods_in_user_mod_folder(user_mods_dir: Path):
                 if line.startswith("path="):
                     path = line.split("=", 1)[1].strip().strip('"')
                     break
+            # sanitize path to prevent traversal attacks in .mod descriptors
             if path:
-                mods.append((f.name, Path(path)))
+                mod_path = Path(path)
+                # resolve relative to the user mods dir parent to catch ../ escapes
+                if not mod_path.is_absolute():
+                    mod_path = (user_mods_dir / mod_path).resolve()
+                else:
+                    mod_path = mod_path.resolve()
+                # reject paths that escape the known mod directory
+                if user_mods_dir.resolve() not in mod_path.parents and mod_path != user_mods_dir.resolve():
+                    logger.warning("Rejected mod path outside user mods dir: %s", path)
+                    continue
+                mods.append((f.name, mod_path))
         except Exception as e:
             logger.debug("Failed to parse mod descriptor %s: %s", f, e)
             continue

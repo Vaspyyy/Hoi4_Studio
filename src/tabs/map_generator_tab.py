@@ -8,12 +8,14 @@ from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QProgressBar,
     QSlider,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -33,6 +35,33 @@ from ..theme import AnimatedButton, create_card_widget, create_section_title
 
 if TYPE_CHECKING:
     from ..main import MainWindow
+
+QUICK_START_TEXT = """
+<h2>Map Generator &mdash; Quick Start</h2>
+
+<p><b>1. Create a land/ocean heightmap</b> in any image editor (GIMP, Krita, Photoshop).<br>
+Paint ocean pixels as <code>RGB(5, 20, 18)</code> &mdash; that exact color is the ocean key.<br>
+Any other color counts as land. Save as <b>PNG</b>.</p>
+
+<p><b>2. Load it here</b> using the <b>Browse</b> button under Land/Ocean.</p>
+
+<p><b>3. (Optional) Add a boundary map</b> &mdash; black lines (#000000) on a white background<br>
+will act as hard borders between territories. The generator respects these edges.</p>
+
+<p><b>4. (Optional) Add a density map</b> &mdash; brighter areas attract more territories/provinces.<br>
+Or use the <b>Uniform</b> / <b>Equator</b> buttons to auto-generate one.</p>
+
+<p><b>5. Generate Territories</b> &mdash; this divides your map into large regions.<br>
+Adjust the sliders and regenerate until the preview looks good.</p>
+
+<p><b>6. Generate Provinces</b> &mdash; subdivides each territory into HOI4-scale provinces.<br>
+You need provinces to export anything useful.</p>
+
+<p><b>7. Export All</b> &mdash; writes all files into your mod's <code>map/</code> folder.</p>
+
+<p><b>Tip:</b> Iterate fast! Generate territories, tweak sliders, regenerate.<br>
+Only generate provinces when you're happy with the territory layout.</p>
+"""
 
 
 class MapGenWorker(QThread):
@@ -76,44 +105,67 @@ class MapGeneratorTab(QWidget):
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
-        layout.addWidget(create_section_title("Map Generator", self))
+        # header row: title + quick start button
+        header = QHBoxLayout()
+        header.addWidget(create_section_title("Map Generator", self))
+        header.addStretch()
+        btn_quick_start = AnimatedButton("Quick Start Guide")
+        btn_quick_start.setToolTip("Open step-by-step tutorial for generating a map")
+        btn_quick_start.clicked.connect(self._show_quick_start)
+        header.addWidget(btn_quick_start)
+        layout.addLayout(header)
 
-        layout.addWidget(QLabel("Input Images"))
+        # step indicator
+        self._step_indicators: list[QLabel] = []
+        self._build_step_indicator(layout)
+
+        # inputs
         self._build_image_inputs(layout)
 
-        layout.addWidget(create_section_title("Territory Settings", self))
-        self._build_territory_settings(layout)
+        # territory settings
+        self._build_territory_settings_section(layout)
 
-        layout.addWidget(create_section_title("Province Settings", self))
-        self._build_province_settings(layout)
+        # province settings
+        self._build_province_settings_section(layout)
 
+        # progress bar
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
 
+        # generate buttons
         gen_layout = QHBoxLayout()
-        self.btn_gen_terr = AnimatedButton("Generate Territories")
-        self.btn_gen_terr.setToolTip("Generate territory map from input images")
+        self.btn_gen_terr = AnimatedButton("2. Generate Territories")
+        self.btn_gen_terr.setToolTip(
+            "Divide the land/ocean map into large regions (territories). "
+            "Adjust sliders and regenerate until the preview looks right."
+        )
         self.btn_gen_terr.clicked.connect(self._on_generate_territories)
-        self.btn_gen_prov = AnimatedButton("Generate Provinces")
-        self.btn_gen_prov.setToolTip("Subdivide territories into provinces")
+        self.btn_gen_prov = AnimatedButton("3. Generate Provinces")
+        self.btn_gen_prov.setToolTip(
+            "Subdivide each territory into HOI4-scale provinces. "
+            "Required before exporting to your mod."
+        )
         self.btn_gen_prov.clicked.connect(self._on_generate_provinces)
         self.btn_gen_prov.setEnabled(False)
         gen_layout.addWidget(self.btn_gen_terr)
         gen_layout.addWidget(self.btn_gen_prov)
         layout.addLayout(gen_layout)
 
+        # preview
         layout.addWidget(create_section_title("Preview", self))
         preview_layout = QHBoxLayout()
         self.territory_preview = QLabel("No territory map generated")
         self.territory_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.territory_preview.setMinimumHeight(200)
+        self.territory_preview.setToolTip("Territory preview &mdash; generated in step 2")
         self.territory_preview.setStyleSheet(
             "border: 1px solid #475569; border-radius: 8px; padding: 8px;"
         )
         self.province_preview = QLabel("No province map generated")
         self.province_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.province_preview.setMinimumHeight(200)
+        self.province_preview.setToolTip("Province preview &mdash; generated in step 3")
         self.province_preview.setStyleSheet(
             "border: 1px solid #475569; border-radius: 8px; padding: 8px;"
         )
@@ -121,61 +173,161 @@ class MapGeneratorTab(QWidget):
         preview_layout.addWidget(self.province_preview)
         layout.addLayout(preview_layout)
 
-        layout.addWidget(create_section_title("Export", self))
+        # export
+        layout.addWidget(create_section_title("4. Export to Mod", self))
         export_layout = QHBoxLayout()
-        self.btn_export_def = AnimatedButton("Export definition.csv")
-        self.btn_export_def.setToolTip("Export HOI4 map/definition.csv")
-        self.btn_export_def.clicked.connect(self._on_export_definition_csv)
-        self.btn_export_def.setEnabled(False)
-        self.btn_export_png = AnimatedButton("Export provinces.png")
-        self.btn_export_png.setToolTip("Export provinces.png to map/ directory")
-        self.btn_export_png.clicked.connect(self._on_export_provinces_png)
-        self.btn_export_png.setEnabled(False)
-        self.btn_export_defs = AnimatedButton("Export Definitions")
-        self.btn_export_defs.setToolTip("Export territory/province definitions as JSON")
-        self.btn_export_defs.clicked.connect(self._on_export_definitions)
-        self.btn_export_defs.setEnabled(False)
-        export_layout.addWidget(self.btn_export_def)
-        export_layout.addWidget(self.btn_export_png)
-        export_layout.addWidget(self.btn_export_defs)
+        self.btn_export_all = AnimatedButton("Export All to Mod")
+        self.btn_export_all.setToolTip(
+            "Write definition.csv, provinces.png, and all JSON definitions "
+            "into your mod's map/ folder in one click."
+        )
+        self.btn_export_all.clicked.connect(self._on_export_all)
+        self.btn_export_all.setEnabled(False)
+        export_layout.addWidget(self.btn_export_all)
         layout.addLayout(export_layout)
 
         outer.addWidget(card)
 
+    # ── step indicator ────────────────────────────────────────────────
+
+    def _build_step_indicator(self, layout: QVBoxLayout) -> None:
+        """Draw a 4-step pipeline indicator: Import → Territories → Provinces → Export."""
+        steps = QHBoxLayout()
+        steps.setContentsMargins(0, 4, 0, 8)
+        step_names = [
+            ("1. Import", "Load land/ocean image (required) + optional inputs"),
+            ("2. Territories", "Divide map into large regions"),
+            ("3. Provinces", "Subdivide into HOI4-scale provinces"),
+            ("4. Export", "Write all files to your mod's map/ folder"),
+        ]
+        for i, (name, tip) in enumerate(step_names):
+            lbl = QLabel(name)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setToolTip(tip)
+            lbl.setStyleSheet(
+                "padding: 4px 10px; border-radius: 4px; font-size: 11px; "
+                "font-weight: bold; background: #2a2a2a; color: #666; "
+                "border: 1px solid #444;"
+            )
+            lbl.setMinimumWidth(80)
+            self._step_indicators.append(lbl)
+            steps.addWidget(lbl, stretch=1)
+            if i < len(step_names) - 1:
+                arrow = QLabel("→")
+                arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                arrow.setStyleSheet("color: #555; font-size: 14px;")
+                arrow.setFixedWidth(20)
+                steps.addWidget(arrow)
+        layout.addLayout(steps)
+        self._update_step_highlight(0)
+
+    def _update_step_highlight(self, active: int) -> None:
+        """Highlight the active step, dim completed/future steps."""
+        colors = [
+            ("#3b82f6", "#1e3a5f", "#60a5fa"),  # blue (active)
+            ("#22c55e", "#14532d", "#86efac"),  # green (done)
+        ]
+        for i, lbl in enumerate(self._step_indicators):
+            if i == active:
+                bg, border, text = "#2a4a6a", "#3b82f6", "#93c5fd"
+            elif i < active:
+                bg, border, text = "#1a3a1a", "#22c55e", "#86efac"
+            else:
+                bg, border, text = "#2a2a2a", "#444", "#666"
+            lbl.setStyleSheet(
+                f"padding: 4px 10px; border-radius: 4px; font-size: 11px; "
+                f"font-weight: bold; background: {bg}; color: {text}; "
+                f"border: 1px solid {border};"
+            )
+
+    # ── image inputs ──────────────────────────────────────────────────
+
     def _build_image_inputs(self, layout: QVBoxLayout) -> None:
-        self.land_preview = self._make_image_preview("Land/Ocean Map (ocean=RGB 5,20,18)")
-        self.boundary_preview = self._make_image_preview("Boundary Map (optional, borders=black)")
-        self.density_preview = self._make_image_preview("Density Map (optional)")
-        self.terrain_preview_input = self._make_image_preview("Terrain Map (optional)")
+        section_label = QLabel(
+            '<b>1. Input Images</b> &nbsp;'
+            '<span style="color:#f87171;font-size:10px;">REQUIRED</span> = land/ocean map. '
+            '<span style="color:#888;font-size:10px;">optional</span> = everything else.'
+        )
+        layout.addWidget(section_label)
+
+        self.land_preview = self._make_image_preview("Click Browse to load image")
+        self.boundary_preview = self._make_image_preview("No boundary map loaded")
+        self.density_preview = self._make_image_preview("No density map loaded")
+        self.terrain_preview_input = self._make_image_preview("No terrain map loaded")
 
         grid = QVBoxLayout()
-        for label_text, preview, browse_fn in [
-            ("Land/Ocean:", self.land_preview, self._browse_land),
-            ("Boundary:", self.boundary_preview, self._browse_boundary),
-            ("Density:", self.density_preview, self._browse_density),
-            ("Terrain:", self.terrain_preview_input, self._browse_terrain),
-        ]:
+        rows_def = [
+            (
+                "Land/Ocean",
+                self.land_preview,
+                self._browse_land,
+                True,
+                "PNG where ocean pixels are exactly RGB(5,20,18). "
+                "Any other color counts as land. This is the only required input.",
+            ),
+            (
+                "Boundary",
+                self.boundary_preview,
+                self._browse_boundary,
+                False,
+                "Optional PNG with black (#000000) lines on a white background. "
+                "Black pixels act as hard borders between territories.",
+            ),
+            (
+                "Density",
+                self.density_preview,
+                self._browse_density,
+                False,
+                "Optional grayscale PNG where brighter = more territories/provinces. "
+                "Use the auto-generate buttons below if you don't have one.",
+            ),
+            (
+                "Terrain",
+                self.terrain_preview_input,
+                self._browse_terrain,
+                False,
+                "Optional PNG where each color maps to a terrain type. "
+                "Used when subdividing into provinces.",
+            ),
+        ]
+        for label_text, preview, browse_fn, required, tooltip in rows_def:
             row = QHBoxLayout()
-            lbl = QLabel(label_text)
-            lbl.setMinimumWidth(80)
+            badge = (
+                '<span style="color:#f87171;font-weight:bold;">REQUIRED</span>'
+                if required
+                else '<span style="color:#666;font-size:10px;">optional</span>'
+            )
+            lbl = QLabel(f"<b>{label_text}</b> &nbsp;{badge}")
+            lbl.setMinimumWidth(130)
+            lbl.setToolTip(tooltip)
             row.addWidget(lbl)
             row.addWidget(preview, stretch=1)
             btn = AnimatedButton("Browse")
+            btn.setToolTip(tooltip)
             btn.clicked.connect(browse_fn)
             row.addWidget(btn)
             grid.addLayout(row)
 
-        density_btns = QHBoxLayout()
-        btn_uniform = AnimatedButton("Uniform")
-        btn_uniform.setToolTip("Create uniform density image")
+        # density auto-generators
+        density_row = QHBoxLayout()
+        density_row.addWidget(QLabel(""))
+        density_row.addStretch()
+        btn_uniform = AnimatedButton("Auto: Uniform")
+        btn_uniform.setToolTip(
+            "Create a density map where all land pixels have equal weight. "
+            "Territories/provinces will be evenly spread across the entire map."
+        )
         btn_uniform.clicked.connect(self._density_uniform)
-        btn_equator = AnimatedButton("Equator")
-        btn_equator.setToolTip("Create equator-weighted density image")
+        btn_equator = AnimatedButton("Auto: Equator")
+        btn_equator.setToolTip(
+            "Create a density map weighted toward the horizontal center "
+            "(equator). Territories/provinces will cluster near the middle "
+            "of the map, thinning out toward the poles."
+        )
         btn_equator.clicked.connect(self._density_equator)
-        density_btns.addWidget(QLabel(""))
-        density_btns.addWidget(btn_uniform)
-        density_btns.addWidget(btn_equator)
-        grid.addLayout(density_btns)
+        density_row.addWidget(btn_uniform)
+        density_row.addWidget(btn_equator)
+        grid.addLayout(density_row)
 
         layout.addLayout(grid)
 
@@ -214,6 +366,7 @@ class MapGeneratorTab(QWidget):
             self._set_preview_image(self.land_preview, self._land_image)
             self._density_image = None
             self._set_preview_image(self.density_preview, None)
+            self._update_step_highlight(0)
 
     def _browse_boundary(self) -> None:
         path = self._open_image_dialog("Select Boundary Image")
@@ -234,7 +387,9 @@ class MapGeneratorTab(QWidget):
         if path:
             Image.MAX_IMAGE_PIXELS = mg_config.MAX_IMAGE_PIXELS
             self._terrain_image = Image.open(path).convert("RGB")
-            self._set_preview_image(self.terrain_preview_input, self._terrain_image.convert("RGBA"))
+            self._set_preview_image(
+                self.terrain_preview_input, self._terrain_image.convert("RGBA")
+            )
 
     def _density_uniform(self) -> None:
         if self._land_image is None:
@@ -258,35 +413,57 @@ class MapGeneratorTab(QWidget):
         )
         return path
 
-    def _build_territory_settings(self, layout: QVBoxLayout) -> None:
+    # ── territory settings ────────────────────────────────────────────
+
+    def _build_territory_settings_section(self, layout: QVBoxLayout) -> None:
+        layout.addWidget(create_section_title("Territory Settings", self))
         form = QHBoxLayout()
 
         self.terr_land_slider, self.terr_land_val = self._make_slider(
-            "Land Territories:",
             mg_config.LAND_TERRITORIES_MIN,
             mg_config.LAND_TERRITORIES_MAX,
             mg_config.LAND_TERRITORIES_DEFAULT,
             mg_config.LAND_TERRITORIES_STEP,
+            "How many land territories to create. More = smaller regions. "
+            "Each territory will later be subdivided into multiple provinces.",
         )
         self.terr_ocean_slider, self.terr_ocean_val = self._make_slider(
-            "Ocean Territories:",
             mg_config.OCEAN_TERRITORIES_MIN,
             mg_config.OCEAN_TERRITORIES_MAX,
             mg_config.OCEAN_TERRITORIES_DEFAULT,
             mg_config.OCEAN_TERRITORIES_STEP,
+            "How many ocean territories to create. "
+            "Higher values create more sea zones for naval gameplay.",
         )
 
         self.terr_jagged_land = QCheckBox("Jagged Land")
+        self.terr_jagged_land.setToolTip(
+            "Add natural-looking irregular borders to land territories "
+            "instead of clean straight lines. Looks more realistic."
+        )
         self.terr_jagged_ocean = QCheckBox("Jagged Ocean")
+        self.terr_jagged_ocean.setToolTip(
+            "Add irregular borders to ocean territories for a more natural look."
+        )
         self.terr_exclude_ocean = QCheckBox("Exclude Ocean from Density")
+        self.terr_exclude_ocean.setToolTip(
+            "ON (recommended): Ocean tiles don't compete with land for territory placement. "
+            "Results in cleaner coastlines and better land borders.\n"
+            "OFF: Oceans participate in density calculations, which can pull "
+            "territories toward the water."
+        )
 
         col1 = QVBoxLayout()
-        col1.addWidget(QLabel("Land Territories:"))
+        lbl1 = QLabel("Land Territories:")
+        lbl1.setToolTip(self.terr_land_slider.toolTip())
+        col1.addWidget(lbl1)
         col1.addWidget(self.terr_land_slider)
         col1.addWidget(self.terr_land_val)
 
         col2 = QVBoxLayout()
-        col2.addWidget(QLabel("Ocean Territories:"))
+        lbl2 = QLabel("Ocean Territories:")
+        lbl2.setToolTip(self.terr_ocean_slider.toolTip())
+        col2.addWidget(lbl2)
         col2.addWidget(self.terr_ocean_slider)
         col2.addWidget(self.terr_ocean_val)
 
@@ -300,47 +477,71 @@ class MapGeneratorTab(QWidget):
         form.addLayout(col3)
         layout.addLayout(form)
 
-    def _build_province_settings(self, layout: QVBoxLayout) -> None:
+    # ── province settings ─────────────────────────────────────────────
+
+    def _build_province_settings_section(self, layout: QVBoxLayout) -> None:
+        layout.addWidget(create_section_title("Province Settings", self))
         form = QHBoxLayout()
 
         self.prov_land_slider, self.prov_land_val = self._make_slider(
-            "Land Provinces:",
             mg_config.LAND_PROVINCES_MIN,
             mg_config.LAND_PROVINCES_MAX,
             mg_config.LAND_PROVINCES_DEFAULT,
             mg_config.LAND_PROVINCES_STEP,
+            "How many land provinces to create per territory. "
+            "Higher = finer granularity (HOI4 vanilla has ~13,000 total provinces). "
+            "This controls province count, not pixel size.",
         )
         self.prov_ocean_slider, self.prov_ocean_val = self._make_slider(
-            "Ocean Provinces:",
             mg_config.OCEAN_PROVINCES_MIN,
             mg_config.OCEAN_PROVINCES_MAX,
             mg_config.OCEAN_PROVINCES_DEFAULT,
             mg_config.OCEAN_PROVINCES_STEP,
+            "How many ocean provinces to create per territory. "
+            "Higher = more sea zones for naval movement.",
         )
         self.prov_density_slider, self.prov_density_val = self._make_slider(
-            "Density Strength:",
             mg_config.DENSITY_STRENGTH_MIN,
             mg_config.DENSITY_STRENGTH_MAX,
             mg_config.DENSITY_STRENGTH_DEFAULT,
             mg_config.DENSITY_STRENGTH_STEP,
+            "How strongly the density map influences province placement.\n"
+            "0 = ignore density entirely (even spread).\n"
+            "10 = strongly cluster provinces in bright areas of the density map.",
         )
 
         self.prov_jagged_land = QCheckBox("Jagged Land")
+        self.prov_jagged_land.setToolTip(
+            "Add irregular borders to land provinces for a natural look."
+        )
         self.prov_jagged_ocean = QCheckBox("Jagged Ocean")
+        self.prov_jagged_ocean.setToolTip(
+            "Add irregular borders to ocean provinces."
+        )
         self.prov_exclude_ocean = QCheckBox("Exclude Ocean from Density")
+        self.prov_exclude_ocean.setToolTip(
+            "ON (recommended): Ocean doesn't compete for province slots. "
+            "Keeps land provinces concentrated on actual land."
+        )
 
         col1 = QVBoxLayout()
-        col1.addWidget(QLabel("Land Provinces:"))
+        lbl1 = QLabel("Land Provinces:")
+        lbl1.setToolTip(self.prov_land_slider.toolTip())
+        col1.addWidget(lbl1)
         col1.addWidget(self.prov_land_slider)
         col1.addWidget(self.prov_land_val)
 
         col2 = QVBoxLayout()
-        col2.addWidget(QLabel("Ocean Provinces:"))
+        lbl2 = QLabel("Ocean Provinces:")
+        lbl2.setToolTip(self.prov_ocean_slider.toolTip())
+        col2.addWidget(lbl2)
         col2.addWidget(self.prov_ocean_slider)
         col2.addWidget(self.prov_ocean_val)
 
         col3 = QVBoxLayout()
-        col3.addWidget(QLabel("Density Strength:"))
+        lbl3 = QLabel("Density Strength:")
+        lbl3.setToolTip(self.prov_density_slider.toolTip())
+        col3.addWidget(lbl3)
         col3.addWidget(self.prov_density_slider)
         col3.addWidget(self.prov_density_val)
 
@@ -357,21 +558,55 @@ class MapGeneratorTab(QWidget):
 
     @staticmethod
     def _make_slider(
-        label: str, min_val: int, max_val: int, default: int, step: int
+        min_val: int,
+        max_val: int,
+        default: int,
+        step: int,
+        tooltip: str = "",
     ) -> tuple[QSlider, QLabel]:
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(min_val, max_val)
         slider.setValue(default)
         slider.setSingleStep(step)
         slider.setPageStep(step * 5)
+        if tooltip:
+            slider.setToolTip(tooltip)
         val_label = QLabel(str(default))
         val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         slider.valueChanged.connect(lambda v: val_label.setText(str(v)))
         return slider, val_label
 
+    # ── quick start ───────────────────────────────────────────────────
+
+    def _show_quick_start(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Map Generator &mdash; Quick Start Guide")
+        dlg.setMinimumSize(600, 480)
+        layout = QVBoxLayout(dlg)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setHtml(QUICK_START_TEXT)
+        browser.setStyleSheet(
+            "QTextBrowser { background: #1e1e1e; color: #ddd; border: 1px solid #444; "
+            "border-radius: 6px; padding: 12px; font-size: 13px; }"
+            "code { background: #333; padding: 1px 4px; border-radius: 3px; color: #fbbf24; }"
+        )
+        layout.addWidget(browser)
+        close_btn = AnimatedButton("Got it!")
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+        dlg.exec()
+
+    # ── generation ────────────────────────────────────────────────────
+
     def _on_generate_territories(self) -> None:
         if self._land_image is None:
-            QMessageBox.warning(self, "Warning", "Import a land/ocean image first.")
+            QMessageBox.warning(
+                self, "Missing Input",
+                "Load a land/ocean image first (step 1).\n\n"
+                "Ocean pixels must be exactly RGB(5,20,18). "
+                "Any other color = land.",
+            )
             return
         if self._worker is not None and self._worker.isRunning():
             return
@@ -379,6 +614,7 @@ class MapGeneratorTab(QWidget):
         self.btn_gen_terr.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setValue(0)
+        self._update_step_highlight(1)
 
         self._worker = MapGenWorker(
             "territory",
@@ -407,15 +643,19 @@ class MapGeneratorTab(QWidget):
 
         self.btn_gen_terr.setEnabled(True)
         self.btn_gen_prov.setEnabled(True)
-        self.btn_export_def.setEnabled(False)
-        self.btn_export_png.setEnabled(False)
-        self.btn_export_defs.setEnabled(True)
+        self.btn_export_all.setEnabled(False)
         self.progress.setVisible(False)
-        self.mw.log_panel.log(f"Generated {len(result.metadata)} territories", "success")
+        self._update_step_highlight(1)
+        self.mw.log_panel.log(
+            f"Generated {len(result.metadata)} territories", "success"
+        )
 
     def _on_generate_provinces(self) -> None:
         if self._territory_result is None:
-            QMessageBox.warning(self, "Warning", "Generate territories first.")
+            QMessageBox.warning(
+                self, "Missing Step",
+                "Generate territories first (step 2), then subdivide into provinces.",
+            )
             return
         if self._worker is not None and self._worker.isRunning():
             return
@@ -423,6 +663,7 @@ class MapGeneratorTab(QWidget):
         self.btn_gen_prov.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setValue(0)
+        self._update_step_highlight(2)
 
         self._worker = MapGenWorker(
             "province",
@@ -448,10 +689,12 @@ class MapGeneratorTab(QWidget):
         self._set_preview_image(self.province_preview, result.image)
 
         self.btn_gen_prov.setEnabled(True)
-        self.btn_export_def.setEnabled(True)
-        self.btn_export_png.setEnabled(True)
+        self.btn_export_all.setEnabled(True)
         self.progress.setVisible(False)
-        self.mw.log_panel.log(f"Generated {len(result.metadata)} provinces", "success")
+        self._update_step_highlight(2)
+        self.mw.log_panel.log(
+            f"Generated {len(result.metadata)} provinces", "success"
+        )
 
     def _on_generation_error(self, msg: str) -> None:
         self.progress.setVisible(False)
@@ -460,60 +703,46 @@ class MapGeneratorTab(QWidget):
         self.mw.log_panel.log(f"Generation error: {msg}", "error")
         QMessageBox.critical(self, "Error", msg)
 
+    # ── export ───────────────────────────────────────────────────────
+
     def _require_mod_root(self) -> Path | None:
         if not self.mw.paths or not self.mw.paths.mod_root:
-            QMessageBox.critical(self, "Error", "Load a project first.")
+            QMessageBox.critical(
+                self, "No Project",
+                "Open or create a mod project first before exporting.",
+            )
             return None
         return self.mw.paths.mod_root
 
-    def _on_export_definition_csv(self) -> None:
+    def _on_export_all(self) -> None:
         mod_root = self._require_mod_root()
         if mod_root is None or self._province_result is None:
             return
+        out_dir = mod_root / "map"
         try:
-            export_definition_csv(
-                self._province_result.metadata, mod_root / "map" / "definition.csv"
-            )
-            self.mw.log_panel.log("Exported map/definition.csv", "success")
-            QMessageBox.information(self, "Done", "Exported definition.csv")
-        except Exception as e:
-            self.mw.log_panel.log(str(e), "error")
-            QMessageBox.critical(self, "Error", str(e))
-
-    def _on_export_provinces_png(self) -> None:
-        mod_root = self._require_mod_root()
-        if mod_root is None or self._province_result is None:
-            return
-        try:
-            export_provinces_png(self._province_result.image, mod_root / "map" / "provinces.png")
-            self.mw.log_panel.log("Exported map/provinces.png", "success")
-            QMessageBox.information(self, "Done", "Exported provinces.png")
-        except Exception as e:
-            self.mw.log_panel.log(str(e), "error")
-            QMessageBox.critical(self, "Error", str(e))
-
-    def _on_export_definitions(self) -> None:
-        mod_root = self._require_mod_root()
-        if mod_root is None:
-            return
-        if self._territory_result is None and self._province_result is None:
-            QMessageBox.warning(self, "Warning", "Generate territories or provinces first.")
-            return
-        try:
-            out_dir = mod_root / "map"
+            export_definition_csv(self._province_result.metadata, out_dir / "definition.csv")
+            export_provinces_png(self._province_result.image, out_dir / "provinces.png")
             if self._territory_result is not None:
                 export_territory_definitions(
                     self._territory_result.metadata, out_dir / "territory_definitions.json"
+                )
+                export_territory_history(
+                    self._territory_result.metadata, out_dir / "territory_history.json"
                 )
             if self._province_result is not None:
                 export_province_definitions(
                     self._province_result.metadata, out_dir / "province_definitions.json"
                 )
-                export_territory_history(
-                    self._territory_result.metadata, out_dir / "territory_history.json"
-                )
-            self.mw.log_panel.log("Exported definition files", "success")
-            QMessageBox.information(self, "Done", "Exported definition files to map/")
+            self._update_step_highlight(3)
+            self.mw.log_panel.log(
+                "Exported all map files to " + str(out_dir), "success"
+            )
+            QMessageBox.information(
+                self, "Export Complete",
+                f"All map files written to:\n{out_dir}\n\n"
+                "Files: definition.csv, provinces.png, territory_definitions.json, "
+                "province_definitions.json, territory_history.json",
+            )
         except Exception as e:
             self.mw.log_panel.log(str(e), "error")
-            QMessageBox.critical(self, "Error", str(e))
+            QMessageBox.critical(self, "Export Error", str(e))

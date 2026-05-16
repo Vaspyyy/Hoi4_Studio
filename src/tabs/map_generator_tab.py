@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -397,9 +398,11 @@ class MapGeneratorTab(QWidget):
         scale = min(max_size[0] / w, max_size[1] / h, 1.0)
         if scale < 1.0:
             rgb = rgb.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-        data = rgb.tobytes("raw", "RGB")
+        # write to BytesIO as a proper image format Qt can parse
+        buf = io.BytesIO()
+        rgb.save(buf, "BMP")
         qimg = QPixmap()
-        qimg.loadFromData(data, "PPM")
+        qimg.loadFromData(buf.getvalue(), "BMP")
         return qimg
 
     def _browse_land(self) -> None:
@@ -408,6 +411,7 @@ class MapGeneratorTab(QWidget):
             Image.MAX_IMAGE_PIXELS = mg_config.MAX_IMAGE_PIXELS
             self._land_image = Image.open(path).convert("RGBA")
             self._set_preview_image(self.land_preview, self._land_image)
+            self.land_preview.setToolTip(f"Land/Ocean: {path}")
             self._density_image = None
             self._set_preview_image(self.density_preview, None)
             self._update_step_highlight(0)
@@ -418,6 +422,7 @@ class MapGeneratorTab(QWidget):
             Image.MAX_IMAGE_PIXELS = mg_config.MAX_IMAGE_PIXELS
             self._boundary_image = Image.open(path).convert("RGBA")
             self._set_preview_image(self.boundary_preview, self._boundary_image)
+            self.boundary_preview.setToolTip(f"Boundary: {path}")
 
     def _browse_density(self) -> None:
         path = self._open_image_dialog("Select Density Image")
@@ -425,6 +430,7 @@ class MapGeneratorTab(QWidget):
             Image.MAX_IMAGE_PIXELS = mg_config.MAX_IMAGE_PIXELS
             self._density_image = Image.open(path).convert("L")
             self._set_preview_image(self.density_preview, self._density_image.convert("RGBA"))
+            self.density_preview.setToolTip(f"Density: {path}")
 
     def _browse_terrain(self) -> None:
         path = self._open_image_dialog("Select Terrain Image")
@@ -434,6 +440,7 @@ class MapGeneratorTab(QWidget):
             self._set_preview_image(
                 self.terrain_preview_input, self._terrain_image.convert("RGBA")
             )
+            self.terrain_preview_input.setToolTip(f"Terrain: {path}")
 
     def _density_uniform(self) -> None:
         if self._land_image is None:

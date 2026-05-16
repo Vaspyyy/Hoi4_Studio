@@ -12,6 +12,7 @@ import csv
 import json
 import logging
 import math
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -210,6 +211,29 @@ def _pack_rgb(r: int, g: int, b: int) -> int:
     return (r << 16) | (g << 8) | b
 
 
+def _to_int(value: object) -> int:
+    """Extract trailing digits from string IDs like 'TRT000001' -> 1."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    s = str(value)
+    m = re.search(r"\d+", s)
+    return int(m.group()) if m else hash(s) & 0x7FFFFFFF
+
+
+def _normalize_ids(meta: list[dict]) -> list[dict]:
+    """Convert string IDs to ints in-place for HOI4 compatibility."""
+    for d in meta:
+        if "province_id" in d:
+            d["province_id"] = _to_int(d["province_id"])
+        if "territory_id" in d:
+            d["territory_id"] = _to_int(d["territory_id"])
+        if "province_ids" in d:
+            d["province_ids"] = [_to_int(p) for p in d["province_ids"]]
+    return meta
+
+
 # ---------------------------------------------------------------------------
 # adjacency computation
 # ---------------------------------------------------------------------------
@@ -390,12 +414,19 @@ def export_weatherpositions_txt(
     if territory_data is None:
         _write_text(Path(path), "1;0.00;0.00;0.00;small\n")
         return
+    n = max(len(territory_data), 1)
     lines = []
     for t in territory_data:
-        tid = t["territory_id"]
+        tid = t["territory_id"]  # normalized to int by export_all_map_files
         x = round(t.get("x", 0), 2)
         y = round(t.get("y", 0), 2)
-        size = "small" if tid > 10 else "medium"
+        # fewer territories -> bigger weather areas
+        if n <= 5:
+            size = "large"
+        elif n <= 15:
+            size = "medium"
+        else:
+            size = "small"
         lines.append(f"{tid};{x:.2f};0.00;{y:.2f};{size}")
     _write_text(Path(path), "\n".join(lines) + "\n")
 
@@ -785,6 +816,10 @@ def export_all_map_files(
     loc_dir = mod_root / "localisation"
     map_dir.mkdir(parents=True, exist_ok=True)
     loc_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- normalize IDs (generator uses string IDs like "TRT000001") ----
+    province_data = _normalize_ids(province_data)
+    territory_data = _normalize_ids(territory_data)
 
     w, h = province_image.size
     results: dict[str, str] = {}

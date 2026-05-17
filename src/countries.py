@@ -24,6 +24,7 @@ def create_mod_structure(paths: HOI4Paths) -> None:
         "common/national_focus",
         "common/ideas",
         "common/characters",
+        "common/bookmarks",
         "history/countries",
         "history/states",
         "history/units",

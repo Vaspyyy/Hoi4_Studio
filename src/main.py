@@ -164,6 +164,10 @@ class MainWindow(QMainWindow):
             from .tabs.map_generator_tab import MapGeneratorTab
             return MapGeneratorTab(self)
 
+        def _make_bookmark():
+            from .tabs.bookmark_tab import BookmarkTab
+            return BookmarkTab(self)
+
         # Registry: (display_name, optional_factory, icon_color_key)
         # factory=None means eager (already built); factory=callable means lazy.
         # Order follows the natural modding workflow: set up, build nations,
@@ -180,6 +184,7 @@ class MainWindow(QMainWindow):
             (_make_state_props,       "State Properties"),
             (_make_world_map,         "Province Map"),
             (_make_map_gen,           "Map Generator"),
+            (_make_bookmark,          "Bookmark Maker"),
         ]
 
         # Store tab references and factories for signal connections

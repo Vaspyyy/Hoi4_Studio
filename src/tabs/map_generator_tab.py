@@ -144,6 +144,10 @@ class MapGeneratorTab(QWidget):
         header.addWidget(btn_quick_start)
         layout.addLayout(header)
 
+        warn = QLabel("<b style='color:#c44'>WARNING: UNDER DEVELOPMENT, IT DOES NOT WORK</b>")
+        warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(warn)
+
         # step indicator
         self._step_indicators: list[QLabel] = []
         self._build_step_indicator(layout)

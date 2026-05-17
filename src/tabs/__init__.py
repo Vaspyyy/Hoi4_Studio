@@ -9,6 +9,7 @@ from .focus_tab import FocusTab
 from .ideas_tab import IdeasTab
 from .localization_tab import LocalizationManagerTab
 from .map_generator_tab import MapGeneratorTab
+from .bookmark_tab import BookmarkTab
 
 __all__ = [
     "WelcomeTab",
@@ -22,4 +23,5 @@ __all__ = [
     "IdeasTab",
     "LocalizationManagerTab",
     "MapGeneratorTab",
+    "BookmarkTab",
 ]

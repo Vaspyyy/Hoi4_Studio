@@ -48,7 +48,7 @@ def _rasterize_svg(svg_path: Path) -> Image.Image:
 def nuclear_delete_mod(
     mod_root: Path, user_mods_dir: Path, descriptor_filename: str | None = None
 ) -> None:
-    # TODO: path guard is fragile — use Path.is_relative_to() against known safe dirs
+    # TODO: path guard is fragile ; use Path.is_relative_to() against known safe dirs
     # instead of len(parts) < 4 which rejects legitimate deep paths and passes clever ones.
     mod_root_resolved = mod_root.expanduser().resolve()
     if len(mod_root_resolved.parts) < 4:
@@ -103,7 +103,7 @@ def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: 
         rgba = img.convert("RGBA").resize(size, Image.LANCZOS)
     rgba.save(png, format="PNG")
     if not _have_magick():
-        # TODO: ImageMagick detection cached at startup — offer manual re-check
+        # TODO: ImageMagick detection cached at startup ; offer manual re-check
         # so users who install it while the app is running don't need a restart.
         raise RuntimeError(
             "ImageMagick is required for DDS portrait export. "
@@ -117,6 +117,6 @@ def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: 
         check=True,
     )
     if not dds.exists():
-        raise RuntimeError("DDS conversion failed — check that ImageMagick is installed and on PATH")
+        raise RuntimeError("DDS conversion failed ; check that ImageMagick is installed and on PATH")
     logger.info("Portrait exported: %s", dds)
     return dds

@@ -17,13 +17,24 @@ def _make_paths(tmp_path):
 
 
 class TestWriteCountryDefinition:
-    def test_writes_color(self, tmp_path):
+    def test_writes_color_to_colors_txt(self, tmp_path):
         paths = _make_paths(tmp_path)
         write_country_definition(paths.mod_root, "ABC", (10, 80, 200))
-        f = paths.mod_root / "common/countries/ABC.txt"
-        assert f.exists()
-        content = f.read_text(encoding="utf-8")
-        assert "color = { 10 80 200 }" in content
+
+        # The country definition file should NOT have the old bare color format
+        def_file = paths.mod_root / "common/countries/ABC.txt"
+        assert def_file.exists()
+        def_content = def_file.read_text(encoding="utf-8")
+        assert "color = { 10 80 200 }" not in def_content
+        assert "graphical_culture" in def_content
+
+        # The colour should be in common/countries/colors.txt with rgb keyword
+        colors_file = paths.mod_root / "common/countries/colors.txt"
+        assert colors_file.exists()
+        colors_content = colors_file.read_text(encoding="utf-8")
+        assert "ABC = {" in colors_content
+        assert "color = rgb { 10 80 200 }" in colors_content
+        assert "color_ui = rgb { 10 80 200 }" in colors_content
 
     def test_includes_gfx_culture(self, tmp_path):
         paths = _make_paths(tmp_path)

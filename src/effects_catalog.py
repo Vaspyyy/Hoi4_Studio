@@ -2,7 +2,7 @@
 HOI4 Modding Studio - Event Effects Catalog
 
 Categorized list of event effects for the event builder and focus tree editor.
-Format: (display_name, effect_code) — see EFFECT_CATEGORIES below.
+Format: (display_name, effect_code) ; see EFFECT_CATEGORIES below.
 """
 
 from __future__ import annotations

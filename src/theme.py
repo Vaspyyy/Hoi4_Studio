@@ -1,7 +1,7 @@
 """
 HOI4 Modding Studio - Theme System
 
-War Room theme — brass, leather, parchment. No SaaS gradients, no
+War Room theme ; brass, leather, parchment. No SaaS gradients, no
 glow effects, no Tailwind blue. Feels like a modder's workbench.
 """
 
@@ -699,7 +699,7 @@ def make_icon(color_hex: str, size: int = 14) -> QIcon:
     return QIcon(pixmap)
 
 
-# ── Tab icon colors — brass/olive/leather palette ──────────────────
+# ── Tab icon colors ; brass/olive/leather palette ──────────────────
 
 TAB_ICONS = {
     "Welcome": "#b8963e",

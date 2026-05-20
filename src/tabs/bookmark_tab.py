@@ -44,10 +44,6 @@ class BookmarkTab(QWidget):
 
         layout.addWidget(create_section_title("Bookmark Maker", self))
 
-        warn = QLabel("<b style='color:#c44'>WARNING: UNDER DEVELOPMENT, IT DOES NOT WORK</b>")
-        warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(warn)
-
         # ── Bookmark properties ──────────────────────────────────────
         layout.addWidget(QLabel("<b>Bookmark Details</b>"))
 
@@ -422,7 +418,7 @@ class BookmarkTab(QWidget):
         if hoi4:
             src = hoi4 / "common" / "defines" / "00_defines.lua"
         if not src or not src.is_file():
-            self.mw.log_panel.log("Vanilla 00_defines.lua not found — skipping defines override.", "warning")
+            self.mw.log_panel.log("Vanilla 00_defines.lua not found ; skipping defines override.", "warning")
             return
 
         text = src.read_text(encoding="utf-8")

@@ -1,10 +1,10 @@
 """
-HOI4 Modding Studio — update checker.
+HOI4 Modding Studio ; update checker.
 
 Hits the GitHub Releases API in a background thread on startup.
 If a newer tagged release exists, emits ``update_available`` with
 the tag name and release URL.  Fails silently on network errors,
-rate limits, or unexpected responses — an update notification is
+rate limits, or unexpected responses ; an update notification is
 a nice-to-have, never an error.
 """
 
@@ -23,7 +23,7 @@ logger = logging.getLogger("hoi4_studio.update_checker")
 
 GITHUB_API = "https://api.github.com/repos/Vaspyyy/Hoi4_Studio/releases/latest"
 USER_AGENT = "hoi4-modding-studio/" + VERSION
-TIMEOUT = 5  # seconds — never block startup
+TIMEOUT = 5  # seconds ; never block startup
 
 
 class UpdateInfo(NamedTuple):
@@ -33,7 +33,7 @@ class UpdateInfo(NamedTuple):
 
 
 class _UpdateWorker(QObject):
-    """Lives on a background thread — does the HTTP call and parsing."""
+    """Lives on a background thread ; does the HTTP call and parsing."""
 
     finished = Signal()
     result = Signal(object)  # UpdateInfo or None
@@ -42,7 +42,7 @@ class _UpdateWorker(QObject):
         try:
             info = self._fetch()
         except Exception:
-            # Network error, rate limit, bad JSON, anything — just skip.
+            # Network error, rate limit, bad JSON, anything ; just skip.
             logger.debug("Update check failed", exc_info=True)
             info = None
         self.result.emit(info)
@@ -60,7 +60,7 @@ class _UpdateWorker(QObject):
             data = json.loads(resp.read().decode())
 
         tag: str = data.get("tag_name", "")
-        # Strip leading 'v' if present — "v0.4.0" → "0.4.0"
+        # Strip leading 'v' if present ; "v0.4.0" → "0.4.0"
         latest_str = tag.removeprefix("v")
         current_str = VERSION.removeprefix("v")
 

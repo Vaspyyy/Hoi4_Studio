@@ -2,7 +2,7 @@
 HOI4 Modding Studio - Idea Modifiers Catalog
 
 Categorized list of modifiers for ideas / national spirits.
-Format: (display_name, modifier_key, default_value) — see MODIFIER_CATEGORIES below.
+Format: (display_name, modifier_key, default_value) ; see MODIFIER_CATEGORIES below.
 """
 
 from __future__ import annotations

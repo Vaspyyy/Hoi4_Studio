@@ -34,7 +34,7 @@ class Token:
 
 def tokenize(text: str) -> list[Token]:
     # TODO: split into _tokenize_string, _tokenize_number_or_ident, _tokenize_comment
-    # helpers — currently 72 lines of deeply nested conditionals with 6 if-c branches.
+    # helpers ; currently 72 lines of deeply nested conditionals with 6 if-c branches.
     tokens: list[Token] = []
     i = 0
     line = 1
@@ -82,8 +82,6 @@ def tokenize(text: str) -> list[Token]:
             continue
 
         if c == '"':
-            # TODO: unterminated quoted strings are silently swallowed —
-            # should raise a parse error with line/col info.
             start_col = col
             i += 1
             col += 1
@@ -94,10 +92,15 @@ def tokenize(text: str) -> list[Token]:
                     col = 0
                 i += 1
                 col += 1
+            if i >= len(text):
+                raise ParseError(
+                    f"Unterminated quoted string starting at column {start_col}",
+                    line=line,
+                    col=start_col,
+                )
             tokens.append(Token(TokenType.STRING, text[start:i], line, start_col))
-            if i < len(text):
-                i += 1
-                col += 1
+            i += 1
+            col += 1
             continue
 
         start = i
@@ -181,6 +184,16 @@ class PdxNode:
 
     def add_child(self, node: "PdxNode") -> None:
         self.children.append(node)
+
+
+class ParseError(ValueError):
+    """Raised when Paradox script parsing fails."""
+
+    def __init__(self, message: str, line: int = 0, col: int = 0):
+        self.line = line
+        self.col = col
+        loc = f" at line {line}, col {col}" if line > 0 else ""
+        super().__init__(f"Parse error{loc}: {message}")
 
 
 class PdxParser:

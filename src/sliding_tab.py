@@ -53,7 +53,7 @@ class SlidingTabWidget(QWidget):
         self._tab_bar.currentChanged.connect(self._on_tab_bar_changed)
 
     def addTab(self, widget, arg1, arg2=None, factory: Callable[[], QWidget] | None = None):
-        """Add a tab. If factory is provided, the tab is lazy — the real widget
+        """Add a tab. If factory is provided, the tab is lazy ; the real widget
         is only created when the user first clicks the tab. This cuts startup
         cost by deferring heavy widget construction (graphics scenes, etc.).
         """

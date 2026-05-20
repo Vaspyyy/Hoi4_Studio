@@ -35,28 +35,32 @@ if TYPE_CHECKING:
     from ..main import MainWindow
 
 QUICK_START_TEXT = """
-<h2>Map Generator &mdash; Quick Start</h2>
+<h2>Map Generator: Quick Start</h2>
 
 <p><b>1. Create a land/ocean heightmap</b> in any image editor (GIMP, Krita, Photoshop).<br>
-Paint ocean pixels as <code>RGB(5, 20, 18)</code> &mdash; that exact color is the ocean key.<br>
+Paint ocean pixels as <code>RGB(5, 20, 18)</code> (that exact color is the ocean key.<br>
 Any other color counts as land. Save as <b>PNG</b>.</p>
 
 <p><b>2. Load it here</b> using the <b>Browse</b> button under Land/Ocean.</p>
 
-<p><b>3. (Optional) Add a boundary map</b> &mdash; black lines (#000000) on a white background<br>
+<p><b>3. (Optional) Add a boundary map</b>: black lines (#000000) on a white background<br>
 will act as hard borders between territories. The generator respects these edges.</p>
 
-<p><b>4. (Optional) Add a density map</b> &mdash; brighter areas attract more territories/provinces.<br>
+<p><b>4. (Optional) Add a density map</b>: brighter areas attract more territories/provinces.<br>
 Or use the <b>Auto: Uniform</b> / <b>Auto: Equator</b> buttons to auto-generate one.</p>
 
-<p><b>5. Generate Territories</b> &mdash; this divides your map into large regions.<br>
+<p><b>5. Generate Territories</b>: this divides your map into large regions.<br>
 Adjust the sliders and regenerate until the preview looks good.</p>
 
-<p><b>6. Generate Provinces</b> &mdash; subdivides each territory into HOI4-scale provinces.</p>
+<p><b>6. Generate Provinces</b>: subdivides each territory into HOI4-scale provinces.</p>
 
-<p><b>7. Export All to Mod</b> &mdash; writes the complete HOI4 map into your mod's<br>
+<p><b>7. Export All to Mod</b>: writes the complete HOI4 map into your mod's<br>
 <code>map/</code> and <code>localisation/</code> folders. This includes definition.csv,<br>
 provinces.bmp, terrain, adjacencies, strategic regions, supply areas, and more.</p>
+
+<p><b>8. Before Playing</b>: launch HOI4 in <b>debug mode</b>, open the <b>Nudger</b><br>
+from the main menu, select <b>Ports</b>, and click <b>Validate All States</b>.<br>
+Skipping this step will cause a crash when you click Start.</p>
 
 <p><b>Tip:</b> Iterate fast! Generate territories, tweak sliders, regenerate.<br>
 Only generate provinces when you're happy with the territory layout.</p>
@@ -144,7 +148,7 @@ class MapGeneratorTab(QWidget):
         header.addWidget(btn_quick_start)
         layout.addLayout(header)
 
-        warn = QLabel("<b style='color:#c44'>WARNING: UNDER DEVELOPMENT, IT DOES NOT WORK</b>")
+        warn = QLabel("<b style='color:#c44'>WARNING: read quick start guide.</b>")
         warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(warn)
 
@@ -199,14 +203,14 @@ class MapGeneratorTab(QWidget):
         self.territory_preview = QLabel("No territory map generated")
         self.territory_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.territory_preview.setMinimumHeight(200)
-        self.territory_preview.setToolTip("Territory preview &mdash; generated in step 2")
+        self.territory_preview.setToolTip("Territory preview (generated in step 2)")
         self.territory_preview.setStyleSheet(
             "border: 1px solid #475569; border-radius: 8px; padding: 8px;"
         )
         self.province_preview = QLabel("No province map generated")
         self.province_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.province_preview.setMinimumHeight(200)
-        self.province_preview.setToolTip("Province preview &mdash; generated in step 3")
+        self.province_preview.setToolTip("Province preview (generated in step 3)")
         self.province_preview.setStyleSheet(
             "border: 1px solid #475569; border-radius: 8px; padding: 8px;"
         )
@@ -639,7 +643,7 @@ class MapGeneratorTab(QWidget):
 
     def _show_quick_start(self) -> None:
         dlg = QDialog(self)
-        dlg.setWindowTitle("Map Generator &mdash; Quick Start Guide")
+        dlg.setWindowTitle("Map Generator: Quick Start Guide")
         dlg.setMinimumSize(620, 520)
         layout = QVBoxLayout(dlg)
         browser = QTextBrowser()
@@ -851,7 +855,15 @@ class MapGeneratorTab(QWidget):
             f"adjacencies.csv, strategic regions, supply areas, "
             f"buildings, localisation placeholders, and more."
             f"{mod_msg}\n\n"
+            f"⚠ BEFORE PLAYING: Launch HOI4 in debug mode, open the Nudger\n"
+            f"from the main menu, select 'Ports', click 'Validate All States'.\n"
+            f"Without this the game will crash on Start.\n\n"
             f"Enable the mod in the Paradox launcher and restart HOI4.",
+        )
+        self.mw.log_panel.log(
+            "⚠ NUDGER PORTS: Before playing, use the HOI4 nudger tool (debug mode main menu) "
+            "→ Ports → Validate All States. Without this the game will crash on Start.",
+            "warning",
         )
 
     def _on_export_error(self, msg: str) -> None:

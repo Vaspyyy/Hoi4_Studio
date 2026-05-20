@@ -72,7 +72,7 @@ def load_mod_tags(mod_root: Path) -> list[str]:
 def load_all_tags(hoi4_install: Optional[Path], mod_root: Optional[Path]) -> list[str]:
     tags: set[str] = set()
 
-    # If the mod overrides country_tags, skip vanilla — otherwise
+    # If the mod overrides country_tags, skip vanilla ; otherwise
     # vanilla tags leak through even though the mod blanks them.
     mod_overrides_tags = (
         mod_root is not None

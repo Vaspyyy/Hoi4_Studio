@@ -4,36 +4,42 @@ HOI4 Modding Studio - Focus Tree Editor Tab
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QColor, QPen, QBrush, QFont, QPainter
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QComboBox,
+    QFormLayout,
+    QGraphicsItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsTextItem,
+    QGraphicsView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
-    QComboBox,
-    QSpinBox,
-    QFormLayout,
     QListWidget,
     QListWidgetItem,
-    QTextEdit,
+    QMessageBox,
     QSizePolicy,
-    QGraphicsScene,
-    QGraphicsView,
-    QGraphicsItem,
-    QGraphicsRectItem,
-    QGraphicsTextItem,
     QSlider,
+    QSpinBox,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
-from ..theme import AnimatedButton, create_card_widget, create_section_title, get_colors, ThemeColors
-from ..focus import load_focus_tree_file, export_focus_tree, export_focus_localisation
-from ..effects_catalog import ALL_EFFECTS
 from ..commands import GenericCommand
+from ..effects_catalog import ALL_EFFECTS
+from ..focus import export_focus_localisation, export_focus_tree, load_focus_tree_file
+from ..theme import (
+    AnimatedButton,
+    ThemeColors,
+    create_card_widget,
+    create_section_title,
+    get_colors,
+)
 from ..widgets import TagPickerWidget
 
 if TYPE_CHECKING:
@@ -43,7 +49,9 @@ from PySide6.QtGui import QUndoStack
 
 
 class FocusNodeItem(QGraphicsRectItem):
-    def __init__(self, tab: "FocusTab", focus_id: str, name: str, x: int, y: int, colors: ThemeColors):
+    def __init__(
+        self, tab: "FocusTab", focus_id: str, name: str, x: int, y: int, colors: ThemeColors
+    ):
         super().__init__(0, 0, 220, 80)
         self.tab = tab
         self.focus_id = focus_id
@@ -135,13 +143,10 @@ class FocusLinkItem(QGraphicsItem):
 
 
 class MinimapView(QWidget):
-    # TODO: self._scale = 0.08 is set but never used — paint recomputes scale
-    # from scene rect. Remove dead field or use as configurable base scale.
     def __init__(self, scene: QGraphicsScene, colors: ThemeColors, parent=None):
         super().__init__(parent)
         self.scene = scene
         self._colors = colors
-        self._scale = 0.08
         self.setFixedSize(200, 120)
         self.setToolTip("Minimap - click to navigate")
 
@@ -515,7 +520,9 @@ class FocusTab(QWidget):
         for n in nodes:
             self.nodes[n["id"]] = n
             self.list.addItem(QListWidgetItem(n["id"]))
-            item = FocusNodeItem(self, n["id"], n["name"], n.get("x", 0), n.get("y", 0), self._colors)
+            item = FocusNodeItem(
+                self, n["id"], n["name"], n.get("x", 0), n.get("y", 0), self._colors
+            )
             self.scene.addItem(item)
             self.items[n["id"]] = item
         for n in nodes:

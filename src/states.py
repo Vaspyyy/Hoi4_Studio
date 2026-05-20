@@ -252,7 +252,7 @@ def read_state_properties(state_file: Path) -> dict:
             result["cores"] = cores
 
         vp_nodes = history.find_all("victory_points")
-        # TODO: victory points parsing logic is opaque — document that VP blocks
+        # TODO: victory points parsing logic is opaque ; document that VP blocks
         # contain {int_1 int_2} {int_3} style nested nodes.
         vp_parts: list[str] = []
         for vp in vp_nodes:

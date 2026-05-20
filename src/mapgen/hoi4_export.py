@@ -13,145 +13,31 @@ import json
 import logging
 import math
 import re
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image
 
+from .vanilla_compat import (
+    COLOUR_MAP_CITIES,
+    CONTINENT_TEMPLATE,
+    DEFAULT_MAP,
+    HOI4_MODULE_CONFIG,
+    REPLACE_PATHS,
+    SEASONS_TXT,
+    STATE_TEMPLATE,
+    STRATEGIC_REGION_TEMPLATE,
+    extract_all_vanilla_palettes,
+    save_indexed_bmp,
+    write_flat_dds,
+)
+
 if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger("hoi4_studio.mapgen.export")
-
-# ---------------------------------------------------------------------------
-# HOI4 terrain palette (indices 0-7 are the main terrain types)
-# ---------------------------------------------------------------------------
-TERRAIN_PALETTE = (
-    (86, 124, 27),       #  0  plains
-    (0, 86, 6),          #  1  forest
-    (112, 74, 31),       #  2  hills
-    (206, 169, 99),      #  3  desert
-    (6, 200, 11),        #  4  jungle
-    (255, 0, 24),        #  5  urban
-    (134, 84, 30),       #  6  mountain
-    (252, 255, 0),       #  7  marsh
-    (73, 59, 15),        #  8
-    (75, 147, 174),      #  9
-    (174, 0, 255),       # 10
-    (92, 83, 76),        # 11
-    (255, 0, 240),       # 12
-    (240, 255, 0),       # 13
-    (55, 90, 220),       # 14
-    (8, 31, 130),        # 15
-    (255, 255, 255),     # 16  white
-    (132, 255, 0),       # 17
-    (255, 126, 0),       # 18
-    (114, 137, 105),     # 19
-    (58, 131, 82),       # 20
-    (255, 0, 127),       # 21
-)
-
-TERRAIN_PLAINS = 0
-TERRAIN_OCEAN = 0  # ocean provinces ignored per definition.csv type field
-
-# trees.bmp palette: indices 3,4,7,10 count as trees per default.map tree={...}
-TREE_PALETTE = (
-    (0, 0, 0),           #  0  no tree
-    (255, 0, 0),         #  1
-    (30, 139, 109),      #  2
-    (18, 100, 78),       #  3  tree
-    (8, 58, 44),         #  4  tree
-    (76, 156, 51),       #  5
-    (47, 120, 24),       #  6
-    (20, 85, 0),         #  7  tree
-    (154, 156, 51),      #  8
-    (118, 120, 24),      #  9
-    (83, 85, 0),         # 10  tree
-    (255, 255, 0),       # 11
-    (213, 160, 0),       # 12
-    (0, 183, 0),         # 13
-    (0, 128, 0),         # 14
-    (0, 60, 0),          # 15
-    (16, 16, 16),        # 16
-)
-
-# default.map template
-DEFAULT_MAP = """\
-definitions = "definition.csv"
-provinces = "provinces.bmp"
-positions = "positions.txt"
-terrain = "terrain.bmp"
-rivers = "rivers.bmp"
-heightmap = "heightmap.bmp"
-tree_definition = "trees.bmp"
-continent = "continent.txt"
-adjacency_rules = "adjacency_rules.txt"
-adjacencies = "adjacencies.csv"
-#climate = "climate.txt"
-ambient_object = "ambient_object.txt"
-seasons = "seasons.txt"
-
-# Define which indices in trees.bmp palette which should count as trees for automatic terrain assignment
-tree = { 3 4 7 10 }
-"""
-
-CONTINENT_TXT = """\
-continents = {
-\tcontinent_1
-}
-"""
-
-SEASONS_TXT = """\
-winter = {
-\tstart_date=00.12.01
-\tend_date=00.02.10
-\thsv_north=          { 0 0.1 1 }
-\tcolorbalance_north= { 0.9 0.9 1 }
-\thsv_center=         { 0.0 1.0 1.0 }
-\tcolorbalance_center= { 1.0 1.0 1.0 }
-\thsv_south=          { 0.0 1.0 1.0 }
-\tcolorbalance_south= { 1.0 1.0 1.0 }
-}
-spring = {
-\tstart_date=00.03.10
-\tend_date=00.04.22
-\thsv_north=          { 0 0.1 1 }
-\tcolorbalance_north= { 0.9 0.9 1 }
-\thsv_center=         { 0.0 1.0 1.0 }
-\tcolorbalance_center= { 1.0 1.0 1.0 }
-\thsv_south=          { 0.0 1.0 1.0 }
-\tcolorbalance_south= { 1.0 1.0 1.0 }
-}
-summer = {
-\tstart_date=00.05.20
-\tend_date=00.09.10
-\thsv_north=          { 0 0.1 1 }
-\tcolorbalance_north= { 0.9 0.9 1 }
-\thsv_center=         { 0.0 1.0 1.0 }
-\tcolorbalance_center= { 1.0 1.0 1.0 }
-\thsv_south=          { 0.0 1.0 1.0 }
-\tcolorbalance_south= { 1.0 1.0 1.0 }
-}
-autumn = {
-\tstart_date=00.10.10
-\tend_date=00.10.31
-\thsv_north=          { 0 0.1 1 }
-\tcolorbalance_north= { 0.9 0.9 1 }
-\thsv_center=         { 0.0 1.0 1.0 }
-\tcolorbalance_center= { 1.0 1.0 1.0 }
-\thsv_south=          { 0.0 1.0 1.0 }
-\tcolorbalance_south= { 1.0 1.0 1.0 }
-}
-tree_winter = { start_date=00.11.15 end_date=00.12.01 }
-tree_winter2 = { start_date=00.12.20 end_date=00.01.20 }
-tree_spring = { start_date=00.02.20 end_date=00.03.01 }
-tree_spring2 = { start_date=00.03.20 end_date=00.04.20 }
-tree_summer = { start_date=00.05.20 end_date=00.06.01 }
-tree_summer2 = { start_date=00.06.20 end_date=00.09.10 }
-tree_autumn = { start_date=00.10.01 end_date=00.10.10 }
-tree_autumn2 = { start_date=00.10.25 end_date=00.11.01 }
-"""
 
 # generic temperate climate for all strategic regions
 # between values stored as strings because HOI4 parses month.day via
@@ -187,16 +73,37 @@ def _write_text(path: Path, content: str) -> None:
 
 def _build_indexed_bmp(
     size: tuple[int, int],
-    palette: tuple[tuple[int, int, int], ...],
     fill_index: int = 0,
 ) -> Image.Image:
-    """Create an 8-bit indexed BMP with the given palette, filled with fill_index."""
+    """Create an 8-bit indexed BMP filled with fill_index.
+
+    Uses a minimal black-only placeholder palette.  The real vanilla palette
+    is applied later by ``save_indexed_bmp()`` before the file is written.
+    """
     img = Image.new("P", size, fill_index)
-    flat_pal = [c for rgb in palette for c in rgb]
-    # pad to 768 bytes (256 * 3)
-    flat_pal.extend([0] * (768 - len(flat_pal)))
-    img.putpalette(flat_pal)
+    img.putpalette([0, 0, 0] + [0] * 765)
     return img
+
+
+def _copy_hoi4_base(mod_root: Path) -> None:
+    """Copy static common/events/decisions/localisation files into the mod.
+
+    These files come from RandomParadox's resources/hoi4/ and populate the
+    11 replace_path directories with game-compatible content so that
+    vanilla files aren't removed without replacement.
+    """
+    base_dir = Path(__file__).resolve().parent.parent.parent / "resources" / "hoi4_base"
+    if not base_dir.is_dir():
+        logger.warning("hoi4_base resource dir not found: %s", base_dir)
+        return
+    try:
+        shutil.copytree(
+            base_dir, mod_root, dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("*.md", ".gitkeep", "descriptor*.mod", "colourMappings*"),
+        )
+        logger.info("Copied hoi4_base static files to %s", mod_root)
+    except OSError as e:
+        logger.error("Failed to copy hoi4_base: %s", e)
 
 
 def _province_image_to_array(province_image: Image.Image) -> np.ndarray:
@@ -211,6 +118,36 @@ def _province_image_to_array(province_image: Image.Image) -> np.ndarray:
 
 def _pack_rgb(r: int, g: int, b: int) -> int:
     return (r << 16) | (g << 8) | b
+
+
+def _bfs_path(
+    graph: dict[int, list[int]],
+    start: int,
+    end: int,
+    max_depth: int = 100,
+) -> list[int] | None:
+    """Return shortest path from start to end via BFS, or None if unreachable
+    or exceeds max_depth."""
+    if start == end:
+        return [start]
+    from collections import deque
+    q = deque([(start, 0)])
+    parent: dict[int, int] = {start: start}
+    while q:
+        cur, depth = q.popleft()
+        for nb in graph.get(cur, []):
+            if nb in parent:
+                continue
+            parent[nb] = cur
+            if nb == end:
+                path = [end]
+                while path[-1] != start:
+                    path.append(parent[path[-1]])
+                path.reverse()
+                return path
+            if depth + 1 < max_depth:
+                q.append((nb, depth + 1))
+    return None
 
 
 def _to_int(value: object) -> int:
@@ -348,6 +285,7 @@ def export_definition_csv(
         coastal = set()
     # internal "ocean" type maps to HOI4 "sea" type field
     _type_map = {"land": "land", "ocean": "sea", "lake": "lake"}
+    _terrain_map = {"ocean": "ocean", "lake": "lakes", "land": "plains"}
     try:
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f, delimiter=";")
@@ -358,8 +296,9 @@ def export_definition_csv(
                 pid = d["province_id"]
                 ptype = d.get("province_type", "land")
                 is_coastal = "true" if pid in coastal else "false"
-                terrain = "plains" if ptype in ("land",) else "ocean"
-                continent = 0 if ptype == "ocean" else 1
+                terrain = _terrain_map.get(ptype, "plains")
+                # RandomParadox: sea + lake provinces get continent 0
+                continent = 0 if ptype in ("ocean", "sea", "lake") else 1
                 w.writerow([
                     pid,
                     d["R"], d["G"], d["B"],
@@ -391,7 +330,7 @@ def export_default_map(path: str | Path) -> None:
 
 
 def export_continent_txt(path: str | Path) -> None:
-    _write_text(Path(path), CONTINENT_TXT)
+    _write_text(Path(path), CONTINENT_TEMPLATE.format(continent_list="\tcontinent_1"))
 
 
 def export_adjacency_rules_txt(path: str | Path) -> None:
@@ -412,47 +351,217 @@ def export_weatherpositions_txt(
     path: str | Path,
     territory_data: list[dict] | None = None,
 ) -> None:
-    """Write weatherpositions.txt with one position per territory at its center."""
+    """Write weatherpositions.txt: one position per territory at its center.
+
+    Vanilla format (verified against HOI4 v1.18):
+      state_id;x;9.90;y;small
+    where 9.90 is a constant z/rotation field present in every vanilla entry.
+    """
     if territory_data is None:
-        _write_text(Path(path), "1;0.00;0.00;0.00;small\n")
+        _write_text(Path(path), "1;0.00;9.90;0.00;small\n")
         return
-    n = max(len(territory_data), 1)
     lines = []
     for t in territory_data:
-        tid = t["territory_id"]  # normalized to int by export_all_map_files
+        tid = t["territory_id"]
         x = round(t.get("x", 0), 2)
         y = round(t.get("y", 0), 2)
-        # fewer territories -> bigger weather areas
-        if n <= 5:
-            size = "large"
-        elif n <= 15:
-            size = "medium"
-        else:
-            size = "small"
-        lines.append(f"{tid};{x:.2f};0.00;{y:.2f};{size}")
+        lines.append(f"{tid};{x:.2f};9.90;{y:.2f};small")
     _write_text(Path(path), "\n".join(lines) + "\n")
 
 
-def export_ambient_object_txt(path: str | Path) -> None:
-    """Minimal ambient object file (valid Paradox script, no objects)."""
-    _write_text(Path(path), "# no ambient objects defined\ntype={\n\ttype=\"frame_border_entity\"\n\tuse_animation=no\n\tscale=100.000000\n\talways_visible=yes\n\tobject={\n\t\tname=\"frame_border_entity_top\"\n\t\tposition={ 0 0 2190 }\n\t\trotation={ 0 0 0 }\n\t}\n}\n")
+def export_ambient_object_txt(size: tuple[int, int], path: str | Path) -> None:
+    """Write ambient_object.txt using RandomParadox template with map-size
+    adjusted frame border positions.
+
+    The template has frame_border and logo entities copied verbatim from
+    the vanilla game; only the vertical resolution and logo x-position
+    are adjusted to match our map size.
+    """
+    from .vanilla_compat import AMBIENT_OBJECT_TEMPLATE
+    w, h = size
+    # vanilla HOI4 frame-border at 5632×2048: top=2190 (2048+142), logo=2130 (2048+82)
+    content = AMBIENT_OBJECT_TEMPLATE.format(
+        yres_top=h + 142,
+        yres_logo=h + 82,
+        xpos_logo=w // 2,
+    )
+    _write_text(Path(path), content)
 
 
-def export_railways_txt(path: str | Path) -> None:
-    _write_text(Path(path), "")
+def export_railways_txt(
+    path: str | Path,
+    province_data: list[dict] | None = None,
+    territory_data: list[dict] | None = None,
+    adjacencies: set[tuple[int, int]] | None = None,
+) -> None:
+    """Write railways.txt with basic connections between territory centers.
+
+    Only land-to-land connections over land provinces are included
+    (sea/lake provinces are skipped during BFS to prevent water crossings).
+
+    If no adjacency data or territories, writes an empty file (game
+    loads fine without railways).
+    """
+    if not province_data or not territory_data or not adjacencies:
+        _write_text(Path(path), "")
+        return
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # build water province set
+    water_pids: set[int] = set()
+    for d in province_data:
+        if d.get("province_type") in ("ocean", "sea", "lake"):
+            water_pids.add(d["province_id"])
+
+    # build province → neighbors graph (land only)
+    graph: dict[int, list[int]] = {}
+    for a, b in adjacencies:
+        if a in water_pids or b in water_pids:
+            continue
+        graph.setdefault(a, []).append(b)
+        graph.setdefault(b, []).append(a)
+
+    # build province → territory_id map (land territories only)
+    prov_terr: dict[int, int] = {}
+    for t in territory_data:
+        if t.get("territory_type") in ("ocean", "sea", "lake"):
+            continue
+        tid = t["territory_id"]
+        for pid in t.get("province_ids", []):
+            if pid not in water_pids:
+                prov_terr[pid] = tid
+
+    # territory center provinces (land territories only)
+    terr_centers: dict[int, int] = {}
+    for t in territory_data:
+        if t.get("territory_type") in ("ocean", "sea", "lake"):
+            continue
+        pids = t.get("province_ids", [])
+        if pids:
+            terr_centers[t["territory_id"]] = pids[0]
+
+    # find adjacent territory pairs (share a border province)
+    pairs: set[tuple[int, int]] = set()
+    for a, b in adjacencies:
+        ta = prov_terr.get(a)
+        tb = prov_terr.get(b)
+        if ta and tb and ta != tb:
+            if (tb, ta) not in pairs:
+                pairs.add((ta, tb))
+
+    # BFS through province graph for each pair
+    entries: list[str] = []
+    done: set[tuple[int, int]] = set()
+    for ta, tb in sorted(pairs):
+        if (ta, tb) in done:
+            continue
+        done.add((ta, tb))
+        start = terr_centers.get(ta)
+        end = terr_centers.get(tb)
+        if not start or not end or start == end:
+            continue
+        # both endpoints must be in the land-only graph
+        if start not in graph or end not in graph:
+            continue
+
+        path_pids = _bfs_path(graph, start, end, max_depth=50)
+        if not path_pids or len(path_pids) < 2:
+            continue
+        entries.append(f"1 {len(path_pids)} " + " ".join(str(p) for p in path_pids))
+
+    try:
+        (path).write_text("\n".join(entries) + ("\n" if entries else ""), encoding="utf-8")
+    except OSError as e:
+        logger.error("Failed to write railways.txt %s: %s", path, e)
 
 
-def export_unitstacks_txt(path: str | Path) -> None:
-    _write_text(Path(path), "")
+def export_unitstacks_txt(
+    path: str | Path,
+    province_data: list[dict] | None = None,
+    territory_data: list[dict] | None = None,
+) -> None:
+    """Write unitstacks.txt with one unit position per land province.
+
+    Vanilla format (verified against HOI4 v1.18):
+      province_id;type_index;x;z;y;rotation;random_value
+    where type_index is unit type (0=land), z ~10.0 is altitude,
+    rotation is orientation, random_value is a seed/weight.
+
+    If no province data, writes empty file (game tolerates this).
+    """
+    if not province_data:
+        _write_text(Path(path), "")
+        return
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # find territory centers for extra unit entries
+    terr_centers: set[int] = set()
+    if territory_data:
+        for t in territory_data:
+            pids = t.get("province_ids", [])
+            if pids:
+                terr_centers.add(pids[0])
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            for d in province_data:
+                if d.get("province_type") == "ocean":
+                    continue
+                pid = d["province_id"]
+                x = round(d["x"], 2)
+                y = round(d["y"], 2)
+                f.write(f"{pid};0;{x};10.00;{y};0.00;0.50\n")
+                # territory capitals get an extra unit stack
+                if pid in terr_centers:
+                    f.write(f"{pid};0;{x};10.00;{y};1.50;0.75\n")
+    except OSError as e:
+        logger.error("Failed to write unitstacks.txt %s: %s", path, e)
 
 
 def export_colors_txt(path: str | Path) -> None:
-    _write_text(Path(path), "")
+    """Write map/colors.txt with basic colour definitions.
+
+    Vanilla format: each line is `color = { r g b }`.  Used for faction
+    colour lookups on the map.  We write 16 basic colours to match the
+    default palette range.
+    """
+    colours = [
+        (86, 124, 27), (0, 86, 6), (112, 74, 31), (206, 169, 99),
+        (6, 200, 11), (255, 0, 24), (134, 84, 30), (252, 255, 0),
+        (73, 59, 15), (75, 147, 174), (174, 0, 255), (92, 83, 76),
+        (255, 0, 240), (240, 255, 0), (55, 90, 220), (8, 31, 130),
+    ]
+    lines = [f"color = {{ {r:>3}  {g:>3}  {b:>3} }}" for r, g, b in colours]
+    _write_text(Path(path), "\n".join(lines) + "\n")
 
 
 def export_cities_txt(path: str | Path) -> None:
-    """Minimal cities.txt - no city groups defined (all land is plains/rural)."""
-    _write_text(Path(path), "types_source = \"map/cities.bmp\"\npixel_step_x = 4\npixel_step_y = 4\n# no city groups defined - map is all rural/plains\n")
+    """Write map/cities.txt with minimal city group definitions.
+
+    Vanilla defines city_group blocks per palette index with building
+    meshes.  We provide a basic group for index 0 (no city, empty).
+    """
+    content = """\
+types_source = "map/cities.bmp"
+pixel_step_x = 4
+pixel_step_y = 4
+
+city_group = {
+\tcolor_index = 0
+\tdensity = 0.00001
+\tbuilding = {
+\t\tdistance = 1
+\t\tmesh = {
+\t\t\t"westerngfx_house_1_1"
+\t\t}
+\t}
+}
+"""
+    _write_text(Path(path), content)
 
 
 # ---------------------------------------------------------------------------
@@ -462,13 +571,14 @@ def export_cities_txt(path: str | Path) -> None:
 def export_terrain_bmp(
     size: tuple[int, int],
     path: str | Path,
+    terrain_palette: list[int],
 ) -> None:
-    """Write terrain.bmp - all plains (index 0) for now."""
+    """Write terrain.bmp: all plains (palette index 0) using vanilla palette."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        img = _build_indexed_bmp(size, TERRAIN_PALETTE, fill_index=TERRAIN_PLAINS)
-        img.save(path, format="BMP")
+        img = _build_indexed_bmp(size, fill_index=0)
+        save_indexed_bmp(img, path, terrain_palette)
     except OSError as e:
         logger.error("Failed to write terrain.bmp %s: %s", path, e)
 
@@ -476,14 +586,14 @@ def export_terrain_bmp(
 def export_rivers_bmp(
     size: tuple[int, int],
     path: str | Path,
+    rivers_palette: list[int],
 ) -> None:
-    """Write blank rivers.bmp (single-color indexed)."""
+    """Write blank rivers.bmp (index 255 = land = no river) using vanilla palette."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        pal = ((0, 0, 0),)
-        img = _build_indexed_bmp(size, pal, fill_index=0)
-        img.save(path, format="BMP")
+        img = _build_indexed_bmp(size, fill_index=255)
+        save_indexed_bmp(img, path, rivers_palette)
     except OSError as e:
         logger.error("Failed to write rivers.bmp %s: %s", path, e)
 
@@ -491,13 +601,19 @@ def export_rivers_bmp(
 def export_heightmap_bmp(
     size: tuple[int, int],
     path: str | Path,
+    heightmap_palette: list[int],
 ) -> None:
-    """Write flat mid-gray heightmap (grayscale BMP)."""
+    """Write flat mid-height heightmap as indexed BMP with vanilla colour table.
+
+    RandomParadox uses an 8-bit indexed BMP with the vanilla heightmap colour
+    table (read from the game install), NOT a grayscale BMP.  Index 128 is the
+    middle of the 0-255 range (flat sea-level terrain).
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        img = Image.new("L", size, 128)
-        img.save(path, format="BMP")
+        img = _build_indexed_bmp(size, fill_index=128)
+        save_indexed_bmp(img, path, heightmap_palette)
     except OSError as e:
         logger.error("Failed to write heightmap.bmp %s: %s", path, e)
 
@@ -505,15 +621,16 @@ def export_heightmap_bmp(
 def export_trees_bmp(
     size: tuple[int, int],
     path: str | Path,
+    trees_palette: list[int],
 ) -> None:
-    """Write blank trees.bmp with correct palette (scaled to 30% of map size like vanilla)."""
+    """Write blank trees.bmp (index 0 = no trees) scaled to ~30% of map size."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tree_w = max(1, int(size[0] * 0.3))
     tree_h = max(1, int(size[1] * 0.3))
     try:
-        img = _build_indexed_bmp((tree_w, tree_h), TREE_PALETTE, fill_index=0)
-        img.save(path, format="BMP")
+        img = _build_indexed_bmp((tree_w, tree_h), fill_index=0)
+        save_indexed_bmp(img, path, trees_palette)
     except OSError as e:
         logger.error("Failed to write trees.bmp %s: %s", path, e)
 
@@ -521,14 +638,14 @@ def export_trees_bmp(
 def export_cities_bmp(
     size: tuple[int, int],
     path: str | Path,
+    cities_palette: list[int],
 ) -> None:
-    """Write blank cities.bmp (single-color indexed)."""
+    """Write blank cities.bmp (index 0 = no city) using vanilla palette."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        pal = ((0, 0, 0),)
-        img = _build_indexed_bmp(size, pal, fill_index=0)
-        img.save(path, format="BMP")
+        img = _build_indexed_bmp(size, fill_index=0)
+        save_indexed_bmp(img, path, cities_palette)
     except OSError as e:
         logger.error("Failed to write cities.bmp %s: %s", path, e)
 
@@ -536,15 +653,46 @@ def export_cities_bmp(
 def export_world_normal_bmp(
     size: tuple[int, int],
     path: str | Path,
+    height_data: np.ndarray | None = None,
 ) -> None:
-    """Write flat world_normal.bmp at half resolution (flat blue = no slope)."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    half_w = max(1, size[0] // 2)
-    half_h = max(1, size[1] // 2)
+    """Write world_normal.bmp at half resolution using Sobel normal computation.
+
+    RandomParadox computes a tangent-space normal map from the heightmap
+    via Sobel gradients, scaled to half the map width/height (factor 2).
+
+    If height_data is None, produces a flat normal map (RGB 128,128,255)
+    which is correct for a completely flat heightmap.
+    """
+    w, h = size
+    half_w = max(1, w // 2)
+    half_h = max(1, h // 2)
+
     try:
-        # flat normal: RGB(128, 128, 255) = pointing straight up
-        img = Image.new("RGB", (half_w, half_h), (128, 128, 255))
+        if height_data is not None and height_data.size > 0:
+            # Sobel gradients (3×3 kernels)
+            # height_data is expected as a 2D float array of shape (h, w)
+            hm = np.asarray(height_data, dtype=np.float32).reshape(h, w)
+            # pad edges
+            padded = np.pad(hm, 1, mode="edge")
+            dy = (padded[2:, 1:-1] - padded[:-2, 1:-1]) / 2.0
+            dx = (padded[1:-1, 2:] - padded[1:-1, :-2]) / 2.0
+
+            # height scale factor (RandomParadox uses sobelFactor)
+            scale = 128.0
+            nx = np.clip(128.0 - dx * scale, 0, 255).astype(np.uint8)
+            ny = np.clip(128.0 - dy * scale, 0, 255).astype(np.uint8)
+            nz = np.full_like(nx, 255, dtype=np.uint8)
+
+            # downsample to half resolution (simple block average)
+            nx_h = nx.reshape(half_h, h // half_h, half_w, w // half_w).mean(axis=(1, 3)).astype(np.uint8)
+            ny_h = ny.reshape(half_h, h // half_h, half_w, w // half_w).mean(axis=(1, 3)).astype(np.uint8)
+            nz_h = nz.reshape(half_h, h // half_h, half_w, w // half_w).mean(axis=(1, 3)).astype(np.uint8)
+
+            rgb = np.stack([nx_h, ny_h, nz_h], axis=-1)
+            img = Image.fromarray(rgb, mode="RGB")
+        else:
+            # flat normal: RGB(128, 128, 255) = pointing straight up
+            img = Image.new("RGB", (half_w, half_h), (128, 128, 255))
         img.save(path, format="BMP")
     except OSError as e:
         logger.error("Failed to write world_normal.bmp %s: %s", path, e)
@@ -558,7 +706,13 @@ def export_adjacencies_csv(
     adjacencies: set[tuple[int, int]],
     path: str | Path,
 ) -> None:
-    """Write map/adjacencies.csv."""
+    """Write map/adjacencies.csv: header only, no data rows.
+
+    RandomParadox writes an empty adjacencies.csv (header only).  HOI4
+    auto-computes province adjacencies from pixel borders in provinces.bmp;
+    custom entries are only needed for sea crossings, straits, canals etc.
+    that cannot be inferred from the province bitmap.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -566,8 +720,7 @@ def export_adjacencies_csv(
             w = csv.writer(f, delimiter=";")
             w.writerow(["From", "To", "Type", "Through", "start_x", "start_y",
                          "stop_x", "stop_y", "adjacency_rule_name", "Comment"])
-            for a, b in sorted(adjacencies):
-                w.writerow([a, b, "land", a, -1, -1, -1, -1, "", f"{a}-{b}"])
+            # no data rows ; game auto-computes from provinces.bmp pixel borders
     except OSError as e:
         logger.error("Failed to write adjacencies.csv %s: %s", path, e)
 
@@ -576,13 +729,18 @@ def export_adjacencies_csv(
 # strategic regions
 # ---------------------------------------------------------------------------
 
-def _weather_block() -> str:
-    """Return the weather {...} block for a generic temperate region."""
-    lines = ["\tweather={"]
+def _weather_periods_block() -> str:
+    """Return 12 period {{ }} blocks for a generic temperate region.
+
+    Matches RandomParadox's templateWeather approach ; only the inner
+    period blocks, no outer weather={{ }} wrapper (that comes from
+    STRATEGIC_REGION_TEMPLATE).
+    """
+    lines: list[str] = []
     for p in _WEATHER_PERIODS:
-        btwn_s, btwx_s, tlo, thi = p[0], p[1], p[2], p[3]
+        btwn_s, btwn_s_end, tlo, thi = p[0], p[1], p[2], p[3]
         lines.append(f"\t\tperiod={{")
-        lines.append(f"\t\t\tbetween={{ {btwn_s} {btwx_s} }}")
+        lines.append(f"\t\t\tbetween={{ {btwn_s} {btwn_s_end} }}")
         lines.append(f"\t\t\ttemperature={{ {tlo:.1f} {thi:.1f} }}")
         lines.append(f"\t\t\tno_phenomenon={p[4]:.3f}")
         lines.append(f"\t\t\train_light={p[5]:.3f}")
@@ -594,7 +752,6 @@ def _weather_block() -> str:
         lines.append(f"\t\t\tsandstorm={p[11]:.3f}")
         lines.append(f"\t\t\tmin_snow_level={p[12]:.3f}")
         lines.append(f"\t\t}}")
-    lines.append("\t}")
     return "\n".join(lines)
 
 
@@ -603,15 +760,16 @@ def export_strategic_regions(
     province_data: list[dict],
     out_dir: str | Path,
 ) -> list[tuple[int, str]]:
-    """
-    Write one strategic region file per territory into out_dir.
+    """Write one strategic region file per territory using RandomParadox template.
+
+    Each file gets a generic temperate climate with 12 monthly weather
+    periods (matching RandomParadox's templateWeather approach).
 
     Returns list of (region_id, region_name) for use in supply areas.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # build territory_id -> province_ids map
     terr_provs: dict[int, list[int]] = {}
     for d in province_data:
         tid = d.get("territory_id")
@@ -619,34 +777,28 @@ def export_strategic_regions(
             terr_provs.setdefault(tid, []).append(d["province_id"])
 
     regions: list[tuple[int, str]] = []
-    weather = _weather_block()
+    weather_periods = _weather_periods_block()
 
     for t in territory_data:
         tid = t["territory_id"]
-        ttype = t.get("territory_type", "land")
         provs = terr_provs.get(tid, [])
         if not provs:
             continue
 
-        name = f"STRATEGICREGION_{tid}"
-        fname = f"{tid}-Territory_{tid}.txt"
         prov_list = " ".join(str(p) for p in sorted(provs))
 
-        content = f"""\
-strategic_region={{
-\tid={tid}
-\tname="{name}"
-\tprovinces={{
-\t\t{prov_list}
-\t}}
-{weather}
-}}
-"""
+        content = STRATEGIC_REGION_TEMPLATE.format(
+            id=tid,
+            province_list=prov_list,
+            weather_periods=weather_periods,
+        )
+
+        fname = f"{tid}-Territory_{tid}.txt"
         try:
             (out_dir / fname).write_text(content, encoding="utf-8")
         except OSError as e:
             logger.error("Failed to write strategic region %s: %s", fname, e)
-        regions.append((tid, name))
+        regions.append((tid, f"STRATEGICREGION_{tid}"))
 
     return regions
 
@@ -659,32 +811,35 @@ def export_supply_areas(
     territory_data: list[dict],
     out_dir: str | Path,
 ) -> None:
-    """
-    Write one supply area per territory (simplest grouping).
-    Each supply area covers its territory's strategic region ID.
+    """Write a single supply_area.txt covering all land territories.
+
+    Vanilla HOI4 v1.18 has one supply area file covering all states
+    on the map.  We match that pattern with a single file whose states
+    block lists every territory ID.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for t in territory_data:
-        tid = t["territory_id"]
-        name = f"SUPPLYAREA_{tid}"
-        fname = f"{tid}-SupplyArea.txt"
+    land_ids = [
+        t["territory_id"]
+        for t in territory_data
+        if t.get("territory_type", "land") not in ("ocean", "sea", "lake")
+    ]
+    if not land_ids:
+        return
 
-        content = f"""\
+    state_list = " ".join(str(tid) for tid in sorted(land_ids))
+    content = f"""\
 supply_area={{
-\tid={tid}
-\tname="{name}"
+\tid=1
+\tname="SUPPLYAREA_1"
 \tvalue=12
 \tstates={{
-\t\t{tid}
+\t\t{state_list}
 \t}}
 }}
 """
-        try:
-            (out_dir / fname).write_text(content, encoding="utf-8")
-        except OSError as e:
-            logger.error("Failed to write supply area %s: %s", fname, e)
+    (out_dir / "1-SupplyArea.txt").write_text(content, encoding="utf-8")
 
 
 def export_supply_nodes(
@@ -693,13 +848,13 @@ def export_supply_nodes(
     path: str | Path,
 ) -> None:
     """
-    Write supply_nodes.txt.
-    Format: province_id node_value (space-separated, two integers per line).
-    Territory capitals get higher supply values; regular provinces get base value.
+    Write supply_nodes.txt in HOI4 format: level province_id.
+
+    RandomParadox writes ``1 <province_id+1>`` for key supply hub provinces
+    only (not every land province).  Territory centers serve as hubs.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # find territory center provinces for higher supply values
     territory_centers: set[int] = set()
     for t in territory_data:
         pids = t.get("province_ids", [])
@@ -707,12 +862,8 @@ def export_supply_nodes(
             territory_centers.add(pids[0])
     try:
         with open(path, "w", encoding="utf-8") as f:
-            for d in province_data:
-                if d.get("province_type") == "ocean":
-                    continue
-                pid = d["province_id"]
-                value = 15 if pid in territory_centers else 5
-                f.write(f"{pid} {value}\n")
+            for pid in sorted(territory_centers):
+                f.write(f"1 {pid}\n")
     except OSError as e:
         logger.error("Failed to write supply_nodes.txt %s: %s", path, e)
 
@@ -723,15 +874,39 @@ def export_supply_nodes(
 
 def export_buildings_txt(
     province_data: list[dict],
+    territory_data: list[dict],
     path: str | Path,
+    coastal: set[int] | None = None,
 ) -> None:
-    """
-    Write minimal buildings.txt.
-    Places one infrastructure entry per land province at its center.
-    No factories/airbases/etc. (user places those manually).
+    """Write buildings.txt with infrastructure + factories + naval bases.
+
+    Vanilla format (verified against HOI4 v1.18):
+      province_id;type;x;z;y;rotation;state_id
+    where z is altitude (~10), rotation is building orientation.
+
+    One infrastructure entry per land province.
+    One arms_factory + industrial_complex at each territory capital.
+    One naval_base_spawn + coastal_bunker on each coastal province.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    if coastal is None:
+        coastal = set()
+
+    prov_terr: dict[int, int] = {}
+    territory_capitals: set[int] = set()
+    for t in territory_data:
+        ttype = t.get("territory_type", "land")
+        if ttype in ("ocean", "sea", "lake"):
+            continue
+        tid = t.get("territory_id", 0)
+        pids = t.get("province_ids", [])
+        if pids:
+            territory_capitals.add(pids[0])
+        for pid in pids:
+            prov_terr[pid] = tid
+
     try:
         with open(path, "w", encoding="utf-8") as f:
             for d in province_data:
@@ -740,7 +915,14 @@ def export_buildings_txt(
                 pid = d["province_id"]
                 x = round(d["x"], 2)
                 y = round(d["y"], 2)
-                f.write(f"{pid};infrastructure;{x};0.00;{y};0.00;1\n")
+                state_id = prov_terr.get(pid, 0)
+                f.write(f"{pid};infrastructure;{x};10.00;{y};0.00;{state_id}\n")
+                if pid in territory_capitals:
+                    f.write(f"{pid};arms_factory;{x};10.00;{y};0.00;{state_id}\n")
+                    f.write(f"{pid};industrial_complex;{x};10.00;{y};0.00;{state_id}\n")
+                if pid in coastal:
+                    f.write(f"{pid};naval_base_spawn;{x};10.00;{y};0.00;{state_id}\n")
+                    f.write(f"{pid};coastal_bunker;{x};10.00;{y};0.00;{state_id}\n")
     except OSError as e:
         logger.error("Failed to write buildings.txt %s: %s", path, e)
 
@@ -827,6 +1009,16 @@ def export_all_map_files(
     province_data = _normalize_ids(province_data)
     territory_data = _normalize_ids(territory_data)
 
+    # ---- extract vanilla palettes from game install (== Hoi4ImageExporter constructor) ----
+    palettes: dict[str, list[int]] | None = None
+    if hoi4_install:
+        try:
+            palettes = extract_all_vanilla_palettes(Path(hoi4_install))
+            logger.info("Extracted vanilla palettes from %s", hoi4_install)
+        except Exception as e:
+            logger.warning("Could not extract vanilla palettes: %s ; falling back to hardcoded", e)
+            palettes = None
+
     w, h = province_image.size
     results: dict[str, str] = {}
 
@@ -850,7 +1042,9 @@ def export_all_map_files(
     export_provinces_bmp(province_image, map_dir / "provinces.bmp")
     results["provinces.bmp"] = "ok"
 
-    # default.map
+    # default.map ; HOI4 does NOT use this file (RandomParadox doesn't
+    # generate one for HOI4).  The game identifies map components via
+    # definition.csv.  Keeping it empty to avoid stale tree-index conflicts.
     export_default_map(map_dir / "default.map")
     results["default.map"] = "ok"
 
@@ -863,28 +1057,49 @@ def export_all_map_files(
     results["adjacencies.csv"] = "ok"
 
     # terrain.bmp
-    export_terrain_bmp((w, h), map_dir / "terrain.bmp")
+    export_terrain_bmp((w, h), map_dir / "terrain.bmp",
+                       palettes["terrainHoi4"] if palettes else [])
     results["terrain.bmp"] = "ok"
 
     # rivers.bmp
-    export_rivers_bmp((w, h), map_dir / "rivers.bmp")
+    export_rivers_bmp((w, h), map_dir / "rivers.bmp",
+                      palettes["riversHoi4"] if palettes else [])
     results["rivers.bmp"] = "ok"
 
     # heightmap.bmp
-    export_heightmap_bmp((w, h), map_dir / "heightmap.bmp")
+    export_heightmap_bmp((w, h), map_dir / "heightmap.bmp",
+                         palettes["heightmapHoi4"] if palettes else [])
     results["heightmap.bmp"] = "ok"
 
     # trees.bmp
-    export_trees_bmp((w, h), map_dir / "trees.bmp")
+    export_trees_bmp((w, h), map_dir / "trees.bmp",
+                     palettes["treesHoi4"] if palettes else [])
     results["trees.bmp"] = "ok"
 
     # cities.bmp
-    export_cities_bmp((w, h), map_dir / "cities.bmp")
+    export_cities_bmp((w, h), map_dir / "cities.bmp",
+                      palettes["citiesHoi4"] if palettes else [])
     results["cities.bmp"] = "ok"
 
     # world_normal.bmp
     export_world_normal_bmp((w, h), map_dir / "world_normal.bmp")
     results["world_normal.bmp"] = "ok"
+
+    # terrain DDS colormaps ; blank neutral files prevent the game from
+    # falling back to vanilla DDS textures (which are sized for 5632×2048
+    # and contain vanilla continents, causing wrong water rendering)
+    terrain_dir = map_dir / "terrain"
+    terrain_dir.mkdir(parents=True, exist_ok=True)
+    write_flat_dds(terrain_dir / "colormap_rgb_cityemissivemask_a.dds",
+                   w, h, r=127, g=140, b=80, a=255)
+    results["terrain/colormap_rgb_cityemissivemask_a.dds"] = "ok"
+
+    for level, factor in [(0, 1), (1, 2), (2, 4)]:
+        ww = max(1, w // factor)
+        hh = max(1, h // factor)
+        write_flat_dds(terrain_dir / f"colormap_water_{level}.dds",
+                       ww, hh, r=30, g=50, b=120, a=255)
+    results["terrain/colormap_water_*.dds"] = "3 water levels"
 
     # positions.txt
     export_positions_txt(map_dir / "positions.txt")
@@ -903,15 +1118,16 @@ def export_all_map_files(
     results["weatherpositions.txt"] = "ok"
 
     # ambient_object.txt
-    export_ambient_object_txt(map_dir / "ambient_object.txt")
+    export_ambient_object_txt((w, h), map_dir / "ambient_object.txt")
     results["ambient_object.txt"] = "ok"
 
     # railways.txt
-    export_railways_txt(map_dir / "railways.txt")
+    export_railways_txt(map_dir / "railways.txt",
+                        province_data, territory_data, adjacencies)
     results["railways.txt"] = "ok"
 
     # unitstacks.txt
-    export_unitstacks_txt(map_dir / "unitstacks.txt")
+    export_unitstacks_txt(map_dir / "unitstacks.txt", province_data, territory_data)
     results["unitstacks.txt"] = "ok"
 
     # colors.txt
@@ -930,28 +1146,34 @@ def export_all_map_files(
     # supply areas
     supply_dir = map_dir / "supplyareas"
     export_supply_areas(territory_data, supply_dir)
-    results["supplyareas/"] = f"{len(territory_data)} areas"
+    results["supplyareas/"] = "1 supply area"
 
     # supply nodes
     export_supply_nodes(province_data, territory_data, map_dir / "supply_nodes.txt")
     results["supply_nodes.txt"] = "ok"
 
     # buildings
-    export_buildings_txt(province_data, map_dir / "buildings.txt")
+    export_buildings_txt(province_data, territory_data, map_dir / "buildings.txt", coastal=coastal)
     results["buildings.txt"] = "ok"
 
     # localisation placeholders
     export_localisation_placeholders(province_data, territory_data, loc_dir)
     results["localisation/"] = "3 yml files"
 
-    # Directories that replace_path covers — HOI4 skips vanilla
+    # copy static common/events/decisions/localisation files from RandomParadox
+    # base ; these populate all 11 replace_path directories with game-compatible
+    # content so vanilla isn't removed without replacement
+    _copy_hoi4_base(mod_root)
+    results["hoi4_base/"] = "copied"
+
+    # Directories that replace_path covers ; HOI4 skips vanilla
     # entirely for these, so no individual country/history override
     # files needed (that was generating 1,400+ empty txt files).
     for d in ("history/countries", "history/units",
               "common/countries"):
         (mod_root / d).mkdir(parents=True, exist_ok=True)
 
-    # common/country_tags/ is special — we WANT blank overrides for
+    # common/country_tags/ is special ; we WANT blank overrides for
     # vanilla's 00_countries.txt + zz_dynamic_countries.txt so no
     # base-game tags sneak in.  replace_path handles directory
     # suppression but blank tag files are a safety net the user
@@ -974,10 +1196,23 @@ def export_all_map_files(
             if not f.exists():
                 f.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
+    # tutorial/tutorial.txt ; required by HOI4, even if empty
+    (mod_root / "tutorial").mkdir(parents=True, exist_ok=True)
+    (mod_root / "tutorial" / "tutorial.txt").write_text("tutorial = { }\n", encoding="utf-8")
+    results["tutorial/tutorial.txt"] = "ok"
+
     # generate state history files from territory data so the viewer
     # (and game) can render provinces with their state assignments
-    export_states(territory_data, mod_root)
+    export_states(territory_data, mod_root, coastal=coastal)
     results["history/states/"] = f"{len(territory_data)} state files"
+
+    # ---- KNOWN ISSUE ----
+    results["⚠ NUDGER PORTS"] = (
+        "WARNING: Coastal provinces need port buildings assigned via the "
+        "HOI4 nudger tool.  Launch the game in debug mode, open the nudger "
+        "from the main menu, select 'Ports', click 'Validate All States'. "
+        "Without this the game will crash on Start."
+    )
 
     return results
 
@@ -986,40 +1221,129 @@ def export_all_map_files(
 # state history generation
 # ---------------------------------------------------------------------------
 
-def export_states(territory_data: list[dict], mod_root: Path) -> None:
-    """Generate history/states/*.txt from territory data.
+def export_states(
+    territory_data: list[dict],
+    mod_root: Path,
+    coastal: set[int] | None = None,
+) -> None:
+    """Generate history/states/*.txt from territory data using RandomParadox template.
 
-    Only land territories get state files — ocean provinces are handled
-    by strategic regions and supply areas instead.
+    Each land territory becomes a state with full HOI4 fields:
+    resources (all zero), population (0), state_category (rural),
+    buildings (infrastructure=0), victory point at first province.
 
-    Each territory becomes a state.  Province IDs come from each
-    territory's province_ids list.  State names use "STATE_N" format
-    for localisation key lookups.
+    Coastal provinces get a naval_base=1 entry in the state history.
+    State category is "rural" (not "wasteland") so building slots
+    exist and naval bases actually function ; wasteland has zero
+    slots which causes map.cpp:1628 port-check failures.
+
+    Population, resources, infrastructure, and state category are
+    auto-computed from province count per state (RandomParadox-style).
+    Province count → population (×5000), resource chances (15% per type),
+    infrastructure (0-5 scaled by size), and category (rural→city).
+
+    Ocean/sea/lake territories are skipped.
     """
     state_dir = mod_root / "history" / "states"
     state_dir.mkdir(parents=True, exist_ok=True)
+
+    if coastal is None:
+        coastal = set()
+
+    cfg = HOI4_MODULE_CONFIG
+    pop_factor = cfg.get("scenario", {}).get("world_population_factor", 1.0)
+    res_base = cfg.get("resource_factor", 2.0)
+    res_factors = {
+        "aluminium": cfg.get("aluminium_factor", 1.0),
+        "chromium": cfg.get("chromium_factor", 1.0),
+        "coal": cfg.get("coal_factor", 1.0),
+        "oil": cfg.get("oil_factor", 1.0),
+        "rubber": cfg.get("rubber_factor", 1.0),
+        "steel": cfg.get("steel_factor", 1.0),
+        "tungsten": cfg.get("tungsten_factor", 1.0),
+    }
+
+    STATE_CATEGORIES = [
+        ("wasteland", 1), ("small_island", 2), ("pastoral", 3),
+        ("rural", 5), ("town", 10), ("large_town", 20),
+        ("city", 40), ("large_city", 80), ("metropolis", 150),
+        ("megalopolis", 300),
+    ]
 
     count = 0
     for t in territory_data:
         ttype = t.get("territory_type", "land")
         if ttype in ("ocean", "sea", "lake"):
-            continue  # ocean provinces → supply areas / strategic regions
+            continue
         tid = t.get("territory_id", 0)
         provs = t.get("province_ids", [])
 
-        # sort for deterministic output
         prov_list = " ".join(str(p) for p in sorted(provs))
+        n_provs = len(provs)
+        cap = provs[0] if provs else 0
+        vp_block = f"victory_points = {{ {cap} 1 }}" if provs else ""
+        owner_block = ""
+        core_block = ""
 
-        lines: list[str] = []
-        lines.append("state = {")
-        lines.append(f"    id = {tid}")
-        lines.append(f"    name = \"STATE_{tid}\"")
-        if prov_list:
-            lines.append(f"    provinces = {{ {prov_list} }}")
-        lines.append("}")
+        # ---- auto population ----
+        population = int(n_provs * 25000 * pop_factor)
 
-        filename = f"{tid}-state.txt"
-        (state_dir / filename).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # ---- auto state category ----
+        category = "rural"
+        for cat_name, threshold in STATE_CATEGORIES:
+            if n_provs >= threshold:
+                category = cat_name
+
+        # ---- auto resources ----
+        rng = np.random.default_rng(tid + 42)
+        resources: dict[str, int] = {}
+        for res_name in ("aluminium", "chromium", "coal", "oil", "rubber", "steel", "tungsten"):
+            chance = 0.04
+            has_res = rng.random() < chance
+            if has_res:
+                amount = max(1, int(rng.integers(5, 21) * res_base * res_factors.get(res_name, 1.0)))
+                resources[res_name] = amount
+            else:
+                resources[res_name] = 0
+
+        # ---- auto infrastructure ----
+        infra = min(5, max(0, n_provs // 8))
+
+        # naval bases for coastal provinces
+        if coastal:
+            nb_parts = []
+            for pid in provs:
+                if pid in coastal:
+                    nb_parts.append(f"{pid} = {{\n\t\t\t\tnaval_base = 1\n\t\t\t}}")
+            naval_bases = "\n\t\t\t".join(nb_parts)
+        else:
+            naval_bases = ""
+
+        content = STATE_TEMPLATE.format(
+            id=tid,
+            population=population,
+            state_category=category,
+            aluminium=resources["aluminium"],
+            chromium=resources["chromium"],
+            oil=resources["oil"],
+            rubber=resources["rubber"],
+            steel=resources["steel"],
+            tungsten=resources["tungsten"],
+            coal=resources["coal"],
+            victory_points=vp_block,
+            owner_block=owner_block,
+            infrastructure=infra,
+            air_base="",
+            arms_factory=0,
+            civilian_factory=0,
+            dockyards="",
+            naval_bases=naval_bases,
+            province_list=prov_list,
+            core_block=core_block,
+        )
+
+        filename = f"{tid}.txt"
+        (state_dir / filename).write_text(content, encoding="utf-8")
         count += 1
 
     logger.info("Wrote %d state files to %s", count, state_dir)

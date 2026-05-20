@@ -42,13 +42,51 @@ def create_mod_structure(paths: HOI4Paths) -> None:
 def write_country_definition(mod_root: Path, tag: str, color: Tuple[int, int, int]) -> None:
     p = mod_root / f"common/countries/{tag}.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
-    r, g, b = color
     p.write_text(
         "graphical_culture = western_european_gfx\n"
-        "graphical_culture_2d = western_european_2d\n"
-        f"color = {{ {r} {g} {b} }}\n",
+        "graphical_culture_2d = western_european_2d\n",
         encoding="utf-8",
     )
+    write_country_color(mod_root, tag, color)
+
+
+def write_country_color(mod_root: Path, tag: str, color: Tuple[int, int, int]) -> None:
+    """Write or update a country's colour entry in common/countries/colors.txt.
+
+    HOI4 reads country colours from this file in the format:
+        TAG = {
+            color = rgb { R G B }
+            color_ui = rgb { R G B }
+        }
+
+    If the tag already exists in the file, its entry is replaced.
+    Otherwise a new entry is appended.
+    """
+    r, g, b = color
+    new_entry = f"""{tag} = {{
+    color = rgb {{ {r} {g} {b} }}
+    color_ui = rgb {{ {r} {g} {b} }}
+}}
+"""
+
+    colors_path = mod_root / "common" / "countries" / "colors.txt"
+    colors_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if colors_path.exists():
+        text = colors_path.read_text(encoding="utf-8")
+        # Try to replace an existing entry for this tag
+        pattern = re.compile(
+            rf"^{re.escape(tag)}\s*=\s*\{{\s*.*?\}}\s*$",
+            re.MULTILINE | re.DOTALL,
+        )
+        if pattern.search(text):
+            new_text = pattern.sub(new_entry.rstrip(), text)
+            colors_path.write_text(new_text, encoding="utf-8")
+            return
+
+    # Append new entry
+    with colors_path.open("a", encoding="utf-8") as f:
+        f.write(new_entry)
 
 
 def _find_vanilla_history_name(hoi4_install: Path, tag: str) -> str | None:
@@ -239,20 +277,24 @@ def generate_mod_descriptor(
     tag_block = "\n\t".join(f'"{t}"' for t in tags)
 
     blocks = [
-        f'version="1.0"',
-        f'tags={{\n\t{tag_block}\n}}',
         f'name="{mod_name}"',
-        f'supported_version="{supported_version}"',
-        f'path="{path_str}"',
+        'picture="thumbnail.png"',
+        'version="v1"',
+        f'user_dir="{mod_name}"',
     ]
     for rp in replace_paths:
         blocks.append(f'replace_path="{rp}"')
+    blocks.append(f'tags={{\n\t{tag_block}\n}}')
+    blocks.append(f'supported_version="{supported_version}"')
+    blocks.append('remote_file_id="<ID>"')
 
-    content = "\n".join(blocks) + "\n"
-    desc.write_text(content, encoding="utf-8")
+    # .mod file (in mods directory) gets path=
+    desc_content = "\n".join(blocks + [f'path="{path_str}"']) + "\n"
+    desc.write_text(desc_content, encoding="utf-8")
 
-    inner = mod_root / "descriptor.mod"
-    inner.write_text(content, encoding="utf-8")
+    # descriptor.mod (inside mod folder) does NOT get path=
+    inner_content = "\n".join(blocks) + "\n"
+    (mod_root / "descriptor.mod").write_text(inner_content, encoding="utf-8")
 
     return desc
 
@@ -296,7 +338,7 @@ def _detect_game_version(hoi4_install: Path) -> str:
 
 
 def _has_content(path: Path) -> bool:
-    """True if path exists (even if empty — an empty dir still triggers replace_path)."""
+    """True if path exists (even if empty ; an empty dir still triggers replace_path)."""
     return path.is_dir()
 
 
@@ -322,26 +364,20 @@ _TAG_MAP: dict[str, str] = {
 }
 
 # dirs that should trigger a replace_path when they have content
-# (history/*, map/strategicregions, map/supplyareas, common/*, events)
+# (only the 11 paths RandomParadox uses ; conservative set that keeps
+# vanilla fallbacks intact for everything else)
 _REPLACE_PATH_DIRS: set[str] = {
-    "history/countries", "history/states", "history/units", "history/general",
-    "map/strategicregions", "map/supplyareas",
+    "history/states",
+    "map/strategicregions",
+    "history/units",
+    "common/ai_strategy",
     "events",
-    "common/abilities", "common/ai_areas", "common/ai_focuses",
-    "common/ai_peace", "common/ai_strategy", "common/ai_strategy_plans",
-    "common/ai_templates", "common/ai_faction_theaters", "common/ai_navy",
-    "common/autonomous_states", "common/bookmarks",
-    "common/countries", "common/country_tags", "common/country_tag_aliases",
-    "common/decisions", "common/decisions/categories",
-    "common/dynamic_modifiers", "common/factions/templates",
-    "common/intelligence_agencies", "common/intelligence_agency_upgrades",
-    "common/military_industrial_organization/organizations",
-    "common/national_focus", "common/on_actions",
-    "common/operation_phases", "common/operations",
-    "common/peace_conference/ai_peace", "common/raids",
-    "common/script_constants", "common/scripted_effects",
-    "common/scripted_guis", "common/scripted_localisation",
-    "common/scripted_triggers", "common/unit_leader", "common/units",
+    "common/on_actions",
+    "common/factions",
+    "common/factions/goals",
+    "common/factions/rules",
+    "common/factions/rules/groups",
+    "common/factions/templates",
 }
 
 

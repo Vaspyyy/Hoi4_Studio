@@ -10,7 +10,7 @@ from PySide6.QtGui import QUndoCommand
 
 
 class GenericCommand(QUndoCommand):
-    # TODO: document the undo/redo contract — redo_fn must be idempotent,
+    # TODO: document the undo/redo contract ; redo_fn must be idempotent,
     # undo_fn must precisely reverse the last redo_fn call, and neither
     # must rely on mutable captured state that changes between calls.
     # Add tests for double-undo, empty-list remove, and dict key-not-found.

@@ -11,9 +11,9 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Callable, Optional
 
-from PySide6.QtCore import QTimer, Signal, QEvent, QObject
+from PySide6.QtCore import QEvent, QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,38 +21,37 @@ from PySide6.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSlider,
     QSpinBox,
     QStatusBar,
-    QLabel,
-    QMessageBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from .sliding_tab import SlidingTabWidget
-
+from . import update_checker
 from .settings import (
     APP_DIR,
     HOI4Paths,
     load_settings,
-    save_settings,
     save_editor_state,
+    save_settings,
 )
+from .sliding_tab import SlidingTabWidget
 from .theme import (
+    TAB_ICONS,
+    THEMES,
     apply_theme,
     get_colors,
-    THEMES,
     make_icon,
-    TAB_ICONS,
 )
 from .version import VERSION
 from .widgets import LogPanel
-from . import update_checker
 
 logger = logging.getLogger("hoi4_studio.main")
 
@@ -107,7 +106,12 @@ class MainWindow(QMainWindow):
         else:
             logger.debug("Logo not found at %s", icon_path)
         self.settings = load_settings()
-        logger.info("Settings: theme=%s, window=%dx%d", self.settings.theme, self.settings.window_width, self.settings.window_height)
+        logger.info(
+            "Settings: theme=%s, window=%dx%d",
+            self.settings.theme,
+            self.settings.window_width,
+            self.settings.window_height,
+        )
         self.paths: Optional[HOI4Paths] = None
         self._changes: list[str] = []
         self.resize(self.settings.window_width, self.settings.window_height)
@@ -120,52 +124,62 @@ class MainWindow(QMainWindow):
 
         self.log_panel = LogPanel(theme=get_colors(self.settings.theme))
 
-        # Eager tabs — always needed at startup
-        from .tabs.welcome_tab import WelcomeTab
+        # Eager tabs ; always needed at startup
         from .tabs.project_tab import ProjectTab
+        from .tabs.welcome_tab import WelcomeTab
 
         self.welcome = WelcomeTab(self)
         self.project = ProjectTab(self)
 
-        # Lazy tab factories — only created on first visit
+        # Lazy tab factories ; only created on first visit
         def _make_country():
             from .tabs.country_tab import CountryTab
+
             return CountryTab(self)
 
         def _make_states():
             from .tabs.states_tab import StatesTab
+
             return StatesTab(self)
 
         def _make_state_props():
             from .tabs.state_properties_tab import StatePropertiesTab
+
             return StatePropertiesTab(self)
 
         def _make_world_map():
             from .tabs.world_map_tab import WorldMapTab
+
             return WorldMapTab(self)
 
         def _make_events():
             from .tabs.event_builder_tab import EventBuilderTab
+
             return EventBuilderTab(self)
 
         def _make_focus():
             from .tabs.focus_tab import FocusTab
+
             return FocusTab(self)
 
         def _make_ideas():
             from .tabs.ideas_tab import IdeasTab
+
             return IdeasTab(self)
 
         def _make_localization():
             from .tabs.localization_tab import LocalizationManagerTab
+
             return LocalizationManagerTab(self)
 
         def _make_map_gen():
             from .tabs.map_generator_tab import MapGeneratorTab
+
             return MapGeneratorTab(self)
 
         def _make_bookmark():
             from .tabs.bookmark_tab import BookmarkTab
+
             return BookmarkTab(self)
 
         # Registry: (display_name, optional_factory, icon_color_key)
@@ -173,18 +187,18 @@ class MainWindow(QMainWindow):
         # Order follows the natural modding workflow: set up, build nations,
         # design focus trees, write events, localise, then tweak states and map.
         tab_defs = [
-            (self.welcome,            None,              "Welcome"),
-            (self.project,            None,              "Project"),
-            (_make_country,           "Nation Designer"),
-            (_make_focus,             "Focus Trees"),
-            (_make_ideas,             "National Spirits"),
-            (_make_events,            "Event Chains"),
-            (_make_localization,      "Localisation"),
-            (_make_states,            "State Browser"),
-            (_make_state_props,       "State Properties"),
-            (_make_world_map,         "Province Map"),
-            (_make_map_gen,           "Map Generator"),
-            (_make_bookmark,          "Bookmark Maker"),
+            (self.welcome, None, "Welcome"),
+            (self.project, None, "Project"),
+            (_make_country, "Nation Designer"),
+            (_make_focus, "Focus Trees"),
+            (_make_ideas, "National Spirits"),
+            (_make_events, "Event Chains"),
+            (_make_localization, "Localisation"),
+            (_make_states, "State Browser"),
+            (_make_state_props, "State Properties"),
+            (_make_world_map, "Province Map"),
+            (_make_map_gen, "Map Generator"),
+            (_make_bookmark, "Bookmark Maker"),
         ]
 
         # Store tab references and factories for signal connections
@@ -236,7 +250,7 @@ class MainWindow(QMainWindow):
         widget = self._tab_refs.get(name)
         if widget is not None:
             return widget
-        # Lazy tab hasn't been shown yet — force-load it
+        # Lazy tab hasn't been shown yet ; force-load it
         for i in range(self.tabs._tab_bar.count()):
             if self.tabs._tab_bar.tabText(i) == name:
                 self.tabs._ensure_loaded(i)
@@ -373,7 +387,7 @@ class MainWindow(QMainWindow):
 
     def _propagate_theme_to_buttons(self, colors) -> None:
         # TODO: full widget tree recursion on every theme switch causes lag
-        # on 10+ tabs — use a signal-based approach instead. Each tab should
+        # on 10+ tabs ; use a signal-based approach instead. Each tab should
         # connect to a theme_changed signal and update itself independently.
         for i in range(self.tabs.count()):
             widget = self.tabs.widget(i)
@@ -422,15 +436,9 @@ class MainWindow(QMainWindow):
             return
         frozen = getattr(sys, "frozen", False)
         if frozen:
-            msg = (
-                f"v{info.latest} is available! "
-                f"Download the latest .exe from the releases page."
-            )
+            msg = f"v{info.latest} is available! Download the latest .exe from the releases page."
         else:
-            msg = (
-                f"v{info.latest} is available! "
-                f"Run  git pull  in the project directory."
-            )
+            msg = f"v{info.latest} is available! Run  git pull  in the project directory."
         self.status_message(msg)
         self.log_panel.log(msg, "info")
         logger.info("Update available: %s → %s (%s)", info.current, info.latest, info.url)
@@ -443,7 +451,7 @@ class MainWindow(QMainWindow):
 
     def refresh_all_tag_dropdowns(self):
         """Emit tags_changed so every tab that cares can refresh itself.
-        Tabs connect to this signal in their __init__ — no hardcoded list.
+        Tabs connect to this signal in their __init__ ; no hardcoded list.
         """
         self.tags_changed.emit()
 
@@ -535,14 +543,28 @@ class _NoScrollFilter(QObject):
 
 def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
     """Show a crash dialog with Send Bug Report and Open Log File buttons."""
+    # TODO: the crash dialog creates a new QApplication if one doesn't exist
+    # (line app = QApplication([])). This is fragile ; if there's truly no app,
+    # we can't show a Qt dialog at all. Fall back to printing to stderr.
+    import tomllib
     import webbrowser
 
-    # TODO: ISSUES_URL should be read from pyproject.toml or a config constant,
-    # not hardcoded here.
-    # TODO: the crash dialog creates a new QApplication if one doesn't exist
-    # (line app = QApplication([])). This is fragile — if there's truly no app,
-    # we can't show a Qt dialog at all. Fall back to printing to stderr.
-    ISSUES_URL = "https://github.com/Vaspyyy/Hoi4_Studio/issues/new?template=bug_report.yml"
+    _default_issues_url = (
+        "https://github.com/Vaspyyy/Hoi4_Studio/issues/new?template=bug_report.yml"
+    )
+    try:
+        # Resolve pyproject.toml relative to this source file.
+        _candidate = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        if _candidate.exists():
+            with open(_candidate, "rb") as _f:
+                _cfg = tomllib.load(_f)
+            ISSUES_URL = (
+                _cfg.get("tool", {}).get("hoi4-studio", {}).get("issues_url", _default_issues_url)
+            )
+        else:
+            ISSUES_URL = _default_issues_url
+    except Exception:
+        ISSUES_URL = _default_issues_url
 
     try:
         from PySide6.QtWidgets import (
@@ -610,7 +632,9 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
 
         btn_send = QPushButton("Send Bug Report")
         btn_send.setMinimumHeight(34)
-        btn_send.setToolTip("Copies report to clipboard and opens GitHub issue form — paste (Ctrl+V) and submit")
+        btn_send.setToolTip(
+            "Copies report to clipboard and opens GitHub issue form ; paste (Ctrl+V) and submit"
+        )
         btn_send.clicked.connect(_send_report)
 
         btn_log = QPushButton("Open Log File")
@@ -640,6 +664,7 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
     except Exception:
         if sys.platform == "win32":
             import ctypes
+
             ctypes.windll.user32.MessageBoxW(0, error_msg, "HOI4 Modding Studio - Error", 0x10)
         else:
             print(f"FATAL: {error_msg}", file=sys.stderr)
@@ -649,7 +674,7 @@ def main():
     logger = None
     log_file = None
     try:
-        from .logging_setup import setup_logging, get_log_file
+        from .logging_setup import get_log_file, setup_logging
 
         logger = setup_logging(APP_DIR)
         log_file = get_log_file()
@@ -669,6 +694,7 @@ def main():
         app.exec()
     except Exception as e:
         import traceback
+
         tb = traceback.format_exc()
         try:
             if logger:

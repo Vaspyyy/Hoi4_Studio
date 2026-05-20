@@ -180,7 +180,7 @@ def _remove_enclaves(pmap: np.ndarray, mask: np.ndarray) -> None:
     if cleared.any() and (pmap >= 0).any():
         # reassign each cleared fragment to the neighbouring territory
         # that shares the longest border within the fill mask.
-        # (was: Euclidean distance_transform_edt — that could reassign
+        # (was: Euclidean distance_transform_edt ; that could reassign
         #  a fragment back to the SAME territory across a water barrier.)
         cleared_labels, n_frags = ndlabel(cleared & mask)
         for cl in range(1, n_frags + 1):

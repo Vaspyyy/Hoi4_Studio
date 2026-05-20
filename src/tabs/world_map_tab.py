@@ -79,7 +79,7 @@ def _fingerprint_dir(d: Path) -> Optional[tuple]:
 
 @dataclass
 class _MapCache:
-    # TODO: document caching strategy — 14 fields with no explanation of which
+    # TODO: document caching strategy ; 14 fields with no explanation of which
     # fingerprint maps to which field, and when cache invalidation triggers.
     provinces_arr: Optional[np.ndarray] = None
     provinces_fp: Optional[tuple] = None
@@ -119,13 +119,35 @@ def _parse_definition_csv(path: Path) -> dict[tuple[int, int, int], int]:
 
 
 _TAG_FILE_RE = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"(.+)"\s*$')
-_COLOR_RE = re.compile(r"color\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}")
+# Match both "color = { R G B }" and "color = rgb { R G B }"
+_COLOR_RE = re.compile(r"color\s*=\s*(?:rgb\s*)?\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}")
 
 
 def _parse_country_colors(
     country_tags_dir: Path, countries_dir: Path
 ) -> dict[str, tuple[int, int, int]]:
     colors: dict[str, tuple[int, int, int]] = {}
+
+    # Primary source: common/countries/colors.txt (HOI4 reads from here)
+    colors_txt = countries_dir / "colors.txt"
+    if colors_txt.is_file():
+        try:
+            txt = colors_txt.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            txt = ""
+        # Match blocks like: ABC = { color = rgb { R G B } color_ui = rgb { R G B } }
+        for block in re.split(r"\n(?=[A-Z0-9]{3}\s*=)", txt):
+            tag_m = re.match(r"^([A-Z0-9]{3})\s*=", block)
+            if not tag_m:
+                continue
+            tag = tag_m.group(1)
+            cm = _COLOR_RE.search(block)
+            if cm:
+                colors[tag] = (
+                    int(cm.group(1)), int(cm.group(2)), int(cm.group(3)),
+                )
+
+    # Fallback: parse country definition files for color = { R G B } lines
     if country_tags_dir.is_dir():
         for tag_file in country_tags_dir.glob("*.txt"):
             try:
@@ -137,6 +159,8 @@ def _parse_country_colors(
                 if not m:
                     continue
                 tag = m.group(1)
+                if tag in colors:
+                    continue
                 rel_path = m.group(2)
                 filename = Path(rel_path).name
                 country_file = countries_dir / filename
@@ -147,9 +171,7 @@ def _parse_country_colors(
                     cm = _COLOR_RE.search(ctxt)
                     if cm:
                         colors[tag] = (
-                            int(cm.group(1)),
-                            int(cm.group(2)),
-                            int(cm.group(3)),
+                            int(cm.group(1)), int(cm.group(2)), int(cm.group(3)),
                         )
                 except Exception:
                     continue
@@ -162,9 +184,7 @@ def _parse_country_colors(
                     cm = _COLOR_RE.search(ctxt)
                     if cm:
                         colors[tag] = (
-                            int(cm.group(1)),
-                            int(cm.group(2)),
-                            int(cm.group(3)),
+                            int(cm.group(1)), int(cm.group(2)), int(cm.group(3)),
                         )
                 except Exception:
                     continue
@@ -276,11 +296,11 @@ def _load_water_texture(
         if not dds_path.exists():
             continue
         try:
-            # TODO: ImageMagick subprocess has 30s timeout with no stderr logging —
+            # TODO: ImageMagick subprocess has 30s timeout with no stderr logging ;
             # if magick hangs (common with corrupt DDS) the map render blocks silently.
             # Also, use _have_magick() result to pick magick vs convert binary.
             # TODO: FileNotFoundError from missing "magick" is caught by outer try/except
-            # before the convert fallback on line ~290 runs — use _magick_bin() helper.
+            # before the convert fallback on line ~290 runs ; use _magick_bin() helper.
             result = subprocess.run(
                 ["magick", "convert", str(dds_path), "-resize", f"{w}x{h}!", "bmp:-"],
                 capture_output=True,
@@ -354,10 +374,10 @@ def _render_political_map(
     all_tags = set(state_owner.values())
     resolved_colors = _resolve_colors(country_colors, all_tags)
 
-    # TODO: 50MB 3D LUT (256x256x256x3) allocated per render — cache it or
+    # TODO: 50MB 3D LUT (256x256x256x3) allocated per render ; cache it or
     # use a sparse approach to avoid OOM on systems with <8GB RAM.
     lut = np.full((256, 256, 256, 3), 30, dtype=np.uint8)
-    # TODO: ocean fallback color [30,80,160] hardcoded — make configurable via settings.
+    # TODO: ocean fallback color [30,80,160] hardcoded ; make configurable via settings.
     lut[:, :, 1] = 80
     lut[:, :, 2] = 160
 
@@ -379,7 +399,7 @@ def _render_political_map(
         pid = rgb_to_prov.get(rgb_key)
         # skip province 0 (null province, needed by HOI4 but not a real area)
         if pid is not None and pid != 0:
-            # province is in definition.csv — if it belongs to a state
+            # province is in definition.csv ; if it belongs to a state
             # (prov_to_state) mark it as land; otherwise keep as ocean.
             sid = prov_to_state.get(pid)
             if sid is not None:
@@ -490,7 +510,7 @@ class MapRenderWorker(QThread):
                 ocean_texture = cache.ocean_texture
             elif self.mod_root:
                 # Only fall back to vanilla ocean texture when the mod
-                # doesn't have its own provinces.bmp — vanilla Earth
+                # doesn't have its own provinces.bmp ; vanilla Earth
                 # ocean patterns look wrong on custom/generated maps.
                 has_custom_map = (self.mod_root / "map" / "provinces.bmp").exists()
                 ocean_texture = _load_water_texture(
@@ -552,7 +572,7 @@ class MapRenderWorker(QThread):
 
     @staticmethod
     def _arr_to_qimage(arr: np.ndarray) -> QImage:
-        # TODO: QImage created from arr.data — if numpy array is GC'd before
+        # TODO: QImage created from arr.data ; if numpy array is GC'd before
         # QImage renders, this segfaults. The .copy() below mitigates but narrow window.
         h, w = arr.shape[:2]
         qimg = QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888)
@@ -863,7 +883,7 @@ class MapGraphicsView(QGraphicsView):
         self._rubber_band_origin: Optional[QPointF] = None
         self._rubber_band_item: Optional[QGraphicsRectItem] = None
 
-        # Debounced highlight rebuild — avoids n+1 problem when
+        # Debounced highlight rebuild ; avoids n+1 problem when
         # toggling many states in rapid succession (rubber band, batch ops).
         self._highlight_timer = QTimer(self)
         self._highlight_timer.setSingleShot(True)
@@ -1096,7 +1116,7 @@ class MapGraphicsView(QGraphicsView):
         self._highlight_timer.start()
 
     def _on_highlight_timer(self) -> None:
-        """Called by debounce timer — actually rebuild the highlight."""
+        """Called by debounce timer ; actually rebuild the highlight."""
         self._rebuild_highlight()
         self._refresh_display()
 
@@ -1213,7 +1233,7 @@ class MapGraphicsView(QGraphicsView):
                 self.toggle_mass_transfer_state.emit(info["state_id"])
                 event.accept()
                 return
-            # Clicked empty/ocean space — start rubber-band drag
+            # Clicked empty/ocean space ; start rubber-band drag
             self._rubber_band_origin = self.mapToScene(event.pos())
             event.accept()
             return  # don't let ScrollHandDrag start panning
@@ -1315,7 +1335,7 @@ class MapGraphicsView(QGraphicsView):
 
         sid = info["state_id"]
         sname = info.get("state_name") or f"State {sid}"
-        owner = info.get("owner") or "—"
+        owner = info.get("owner") or "(none)"
 
         menu = QMenu(self)
 
@@ -1349,7 +1369,7 @@ class CountryLegendWidget(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(4, 4, 4, 4)
         self._layout.setSpacing(2)
-        # TODO: hardcoded "dark" theme assumption — pass a is_dark flag or
+        # TODO: hardcoded "dark" theme assumption ; pass a is_dark flag or
         # ThemeColors from WorldMapTab so swatch borders adapt to theme.
         self._label_stylesheet = "font-weight: 700; font-size: 13px; padding: 4px 0;"
         self._name_stylesheet = "font-size: 12px;"
@@ -1596,7 +1616,7 @@ class WorldMapTab(QWidget):
             if not mod_tags.is_dir():
                 colors.update(_parse_country_colors(Path("."), mod_countries))
             # if the mod has country_tags with override files (even empty),
-            # skip vanilla colors — the mod intentionally blanks them out
+            # skip vanilla colors ; the mod intentionally blanks them out
             mod_has_overrides = mod_tags.is_dir() and any(mod_tags.iterdir())
 
         if self.mw.paths and self.mw.paths.hoi4_install and not mod_has_overrides:

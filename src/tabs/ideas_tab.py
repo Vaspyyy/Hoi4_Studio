@@ -156,6 +156,7 @@ class IdeasTab(QWidget):
         # ── Idea list (single list with checkboxes) ─────────────────────
         layout.addWidget(QLabel("<b>Ideas</b>"))
         self.idea_list = QListWidget()
+        self.idea_list.setMinimumHeight(250)
         self.idea_list.setToolTip("Double-click an idea to edit it. Check = assigned to country.")
         self.idea_list.itemDoubleClicked.connect(self._on_idea_double_clicked)
         self.idea_list.itemChanged.connect(self._on_idea_check_changed)
@@ -237,7 +238,14 @@ class IdeasTab(QWidget):
         self.idea_list.blockSignals(True)
         self.idea_list.clear()
         for idea in ideas:
-            item = QListWidgetItem(f"{idea['id']}: {idea.get('name', '')}")
+            desc = idea.get("desc", "")
+            if desc and desc in self._idea_loc:
+                desc = self._idea_loc[desc]
+            name = idea.get("name", "") or desc or ""
+            display = f"{idea['id']}"
+            if name:
+                display += f": {name}"
+            item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, idea)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if idea.get("assigned") else Qt.CheckState.Unchecked)

@@ -95,6 +95,12 @@ class BookmarkTab(QWidget):
         # ── Country list ─────────────────────────────────────────────
         layout.addWidget(QLabel("<b>Countries in Bookmark</b>"))
 
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Filter by tag...")
+        self._search_input.setToolTip("Type a country tag to filter the list")
+        self._search_input.textChanged.connect(self._apply_filter)
+        layout.addWidget(self._search_input)
+
         self._scroll_inner: QVBoxLayout | None = None
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -107,6 +113,21 @@ class BookmarkTab(QWidget):
         btn_refresh.setToolTip("Re-scan mod for country tags and their ideologies")
         btn_refresh.clicked.connect(self._refresh_countries)
         btn_row.addWidget(btn_refresh)
+
+        btn_select_all = AnimatedButton("All")
+        btn_select_all.setToolTip("Select every country")
+        btn_select_all.clicked.connect(self._select_all)
+        btn_row.addWidget(btn_select_all)
+
+        btn_deselect = AnimatedButton("None")
+        btn_deselect.setToolTip("Deselect every country")
+        btn_deselect.clicked.connect(self._deselect_all)
+        btn_row.addWidget(btn_deselect)
+
+        btn_load = AnimatedButton("Load Existing")
+        btn_load.setToolTip("Load the mod's current bookmark file and populate the form")
+        btn_load.clicked.connect(self._load_bookmark)
+        btn_row.addWidget(btn_load)
 
         btn_row.addStretch()
 
@@ -269,7 +290,9 @@ class BookmarkTab(QWidget):
         for tag in tags:
             ideology = self._read_country_ideology(tag)
 
-            row_l = QHBoxLayout()
+            row_w = QWidget()
+            row_l = QHBoxLayout(row_w)
+            row_l.setContentsMargins(0, 0, 0, 0)
 
             chk = QCheckBox(tag)
             chk.setChecked(True)
@@ -290,16 +313,108 @@ class BookmarkTab(QWidget):
             hist_val.setMinimumWidth(220)
             row_l.addWidget(hist_val)
 
-            self._scroll_inner.addLayout(row_l)
+            self._scroll_inner.addWidget(row_w)
             self._country_data.append((chk, ideology, hist_key, hist_val, tag))
             self.default_country.addItem(tag)
 
         self._scroll_inner.addStretch()
         self.mw.log_panel.log(f"Found {len(tags)} country tag(s) in mod.", "info")
+        self._apply_filter(self._search_input.text())
+
+    def _apply_filter(self, text: str) -> None:
+        query = text.strip().upper()
+        for chk, *_ in self._country_data:
+            row = chk.parent()
+            if row:
+                row.setVisible(not query or query in chk.text().upper())
+
+    def _select_all(self) -> None:
+        for chk, *_ in self._country_data:
+            chk.setChecked(True)
+
+    def _deselect_all(self) -> None:
+        for chk, *_ in self._country_data:
+            chk.setChecked(False)
 
     # -----------------------------------------------------------------
     # generation
     # -----------------------------------------------------------------
+
+    def _load_bookmark(self) -> None:
+        mod = self._mod_root()
+        if not mod:
+            return
+        bm_path = mod / "common" / "bookmarks" / "the_gathering_storm.txt"
+        if not bm_path.is_file():
+            self.mw.log_panel.log("No existing bookmark file found in mod.", "warning")
+            return
+
+        text = bm_path.read_text(encoding="utf-8")
+
+        name_m = re.search(r'name\s*=\s*"([^"]*)"', text)
+        if name_m:
+            name = name_m.group(1).replace("_BOOKMARK", "").replace("_", " ").title()
+            self.bm_name.setText(name)
+
+        desc_m = re.search(r'desc\s*=\s*"([^"]*)"', text)
+        if desc_m:
+            desc_key = desc_m.group(1).replace("_BOOKMARK_DESC", "").replace("_", " ").title()
+            self.bm_desc.setText(desc_key)
+
+        date_m = re.search(r'date\s*=\s*(\S+)', text)
+        if date_m:
+            self.start_date.setText(date_m.group(1))
+
+        default_m = re.search(r'default_country\s*=\s*"([^"]*)"', text)
+        if default_m:
+            idx = self.default_country.findText(default_m.group(1))
+            if idx >= 0:
+                self.default_country.setCurrentIndex(idx)
+
+        pic_m = re.search(r'picture\s*=\s*"([^"]*)"', text)
+        if pic_m:
+            self.bm_pic.setText(pic_m.group(1))
+
+        # parse per-country entries: "TAG"={ history = "..." ideology = ... }
+        existing: dict[str, tuple[str, str]] = {}
+        for m in re.finditer(r'"(\w{2,4})"=\{.*?\}', text, flags=re.DOTALL):
+            tag = m.group(1)
+            block = m.group(0)
+            hist_m = re.search(r'history\s*=\s*"([^"]*)"', block)
+            ideo_m = re.search(r'ideology\s*=\s*(\S+)', block)
+            existing[tag] = (
+                hist_m.group(1) if hist_m else f"{tag}_BOOKMARK_DESC",
+                ideo_m.group(1) if ideo_m else "neutrality",
+            )
+
+        if not hasattr(self, "_country_data") or not self._country_data:
+            self.mw.log_panel.log("No countries loaded. Click Refresh first.", "warning")
+            return
+
+        # match existing data by tag, load localisation values for desc
+        mod_loc = self._read_bookmark_localisation(mod)
+        for chk, ideology, hkey, hval, tag in self._country_data:
+            if tag in existing:
+                chk.setChecked(True)
+                hkey_text, hval_text = existing[tag]
+                hkey.setText(hkey_text)
+                hval.setText(mod_loc.get(hkey_text, hval.text()))
+            else:
+                chk.setChecked(False)
+
+        self.mw.log_panel.log(f"Loaded {len(existing)} countries from existing bookmark.", "info")
+
+    def _read_bookmark_localisation(self, mod: Path) -> dict[str, str]:
+        """Read bookmark descriptions from mod's bookmarks_l_english.yml."""
+        from ..localisation import parse_english_localisation
+
+        result: dict[str, str] = {}
+        for fname in ["bookmarks_l_english.yml", "zzz_mod_localisation_l_english.yml"]:
+            p = mod / "localisation" / "english" / fname
+            if p.is_file():
+                result.update(parse_english_localisation(p.parent))
+                break  # one dir is enough
+        return result
 
     def _generate(self) -> None:
         mod = self._mod_root()
@@ -342,8 +457,12 @@ class BookmarkTab(QWidget):
         if default_tag not in {s[0] for s in selected}:
             default_tag = selected[0][0]
 
-        # -- read vanilla template --
-        text = vanilla_bm.read_text(encoding="utf-8")
+        # -- read existing bookmark (mod's, or vanilla as template) --
+        mod_bm = mod / "common" / "bookmarks" / "the_gathering_storm.txt"
+        if mod_bm.is_file():
+            text = mod_bm.read_text(encoding="utf-8")
+        else:
+            text = vanilla_bm.read_text(encoding="utf-8")
 
         # replace header fields (match vanilla quoting style)
         text = re.sub(r'name\s*=\s*"[^"]*"', f'name = "{bm_key}"', text, count=1)
@@ -355,8 +474,24 @@ class BookmarkTab(QWidget):
         bm_pic = self._import_bookmark_picture(mod, self._sanitise_key(name))
         text = re.sub(r'picture\s*=\s*"[^"]*"', f'picture = "{bm_pic}"', text, count=1)
 
-        # build country entries (vanilla format: "TAG"={ with no space before =)
+        # -- build country entries --
+        # keep existing entries for unselected countries, replace selected ones
+        selected_tags = {tag for tag, _, _, _ in selected}
         country_blocks: list[str] = []
+
+        # extract existing country blocks for unselected tags
+        existing_cb = re.findall(
+            r'\t\t"(\w{2,4})"=\{.*?\n\t\t\}',
+            text.replace("\t", "\\t"),
+            flags=re.DOTALL,
+        )
+        # fallback: simple raw match
+        for m in re.finditer(r'"(\w{2,4})"=\{.*?\n\t\t\}', text, flags=re.DOTALL):
+            tag = m.group(1)
+            if tag in selected_tags:
+                continue
+            country_blocks.append(m.group(0))
+
         for tag, ideology, hkey, hval in selected:
             focus = self._read_focus_tree(tag)
             block = f'\t\t"{tag}"={{\n'
@@ -369,7 +504,7 @@ class BookmarkTab(QWidget):
 
         country_section = "\n".join(country_blocks)
 
-        # strip all vanilla country entries between "default = yes" and "effect"
+        # strip all vanilla/mod country entries between "default = yes" and "effect"
         text = re.sub(
             r'(default\s*=\s*yes\s*\n).*?(\n\t\teffect\s*=)',
             rf'\1\n{country_section}\n\2',
@@ -388,22 +523,29 @@ class BookmarkTab(QWidget):
         except OSError as e:
             self.mw.log_panel.log(f"Failed to write bookmark: {e}", "error")
 
-        # -- write localisation --
+        # -- write localisation (merge, don't overwrite) --
+        from ..localisation import (
+            append_localisation,
+            delete_localisation_keys,
+        )
+
         loc_dir = mod / "localisation" / "english"
         loc_dir.mkdir(parents=True, exist_ok=True)
         loc_path = loc_dir / "bookmarks_l_english.yml"
 
-        loc_lines: list[str] = ["\ufeffl_english:"]
-        loc_lines.append(f' {bm_key}:0 "{name}"')
-        loc_lines.append(f' {bm_desc_key}:0 "{self.bm_desc.text().strip()}"')
+        entries: dict[str, str] = {}
+        entries[bm_key] = name
+        entries[bm_desc_key] = self.bm_desc.text().strip()
         for _, _, hkey, hval in selected:
-            loc_lines.append(f' {hkey}:0 "{hval}"')
+            entries[hkey] = hval
+        append_localisation(loc_path, entries)
 
-        try:
-            loc_path.write_text("\n".join(loc_lines) + "\n", encoding="utf-8")
-            self.mw.log_panel.log(f"Wrote localisation: {loc_path}", "success")
-        except OSError as e:
-            self.mw.log_panel.log(f"Failed to write localisation: {e}", "error")
+        # Remove stale copies from zzz_mod... so the bookmark file always wins.
+        zzz_path = loc_dir / "zzz_mod_localisation_l_english.yml"
+        if zzz_path.is_file():
+            delete_localisation_keys(zzz_path, set(entries.keys()))
+
+        self.mw.log_panel.log(f"Updated localisation: {loc_path}", "success")
 
         # -- write defines override --
         self._write_defines_override(mod, hoi4, start, end)

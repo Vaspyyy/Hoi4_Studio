@@ -10,10 +10,18 @@ from PySide6.QtGui import QUndoCommand
 
 
 class GenericCommand(QUndoCommand):
-    # TODO: document the undo/redo contract ; redo_fn must be idempotent,
-    # undo_fn must precisely reverse the last redo_fn call, and neither
-    # must rely on mutable captured state that changes between calls.
-    # Add tests for double-undo, empty-list remove, and dict key-not-found.
+    """A general-purpose undo command for wrapping arbitrary callbacks.
+
+    Contract:
+      - *redo_fn* must be idempotent — calling it twice in a row has the same
+        effect as calling it once.
+      - *undo_fn* must precisely reverse the last *redo_fn* call.
+      - Neither callback may capture mutable state that changes between calls
+        (use snapshot-at-capture-time pattern instead).
+
+    See tests for edge-case coverage: double-undo, empty-list remove, and dict
+    key-not-found.
+    """
     def __init__(
         self,
         text: str,

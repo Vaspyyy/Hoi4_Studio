@@ -138,11 +138,10 @@ def write_country_history(
 recruit_character = {leader_id}
 
 set_popularities = {{
- democratic = {pops.get("democratic", 0)}
- fascism = {pops.get("fascism", 0)}
- communism = {pops.get("communism", 0)}
- neutrality = {pops.get("neutrality", 0)}
-}}
+"""
+    for ideo_name, pop_val in sorted(pops.items()):
+        txt += f" {ideo_name} = {pop_val}\n"
+    txt += f"""}}
 
 set_politics = {{
  ruling_party = {ruling_party}
@@ -158,14 +157,28 @@ set_country_leader = {{
 
 
 def write_localisation_country(mod_root: Path, tag: str, name: str, adj: str) -> None:
-    loc = mod_root / f"localisation/english/{tag}_country_l_english.yml"
+    loc = mod_root / f"localisation/english/zzz_{tag}_country_l_english.yml"
     loc.parent.mkdir(parents=True, exist_ok=True)
+    # Remove old file without zzz_ prefix to avoid stale duplicates.
+    old = mod_root / f"localisation/english/{tag}_country_l_english.yml"
+    if old.exists():
+        old.unlink()
     lines = [f"\ufeffl_english:\n"]
     for suffix in ["", "_neutrality", "_democratic", "_fascism", "_communism"]:
         lines.append(f' {tag}{suffix}:0 "{name}"\n')
         lines.append(f' {tag}{suffix}_DEF:0 "{name}"\n')
     lines.append(f' {tag}_ADJ:0 "{adj}"\n')
     loc.write_text("".join(lines), encoding="utf-8")
+    # Purge same-tag entries from zzz_mod_localisation so this file wins.
+    from .localisation import delete_localisation_keys
+
+    zzz_mod = mod_root / "localisation/english/zzz_mod_localisation_l_english.yml"
+    if zzz_mod.is_file():
+        purge = {f"{tag}{suffix}" for suffix in
+                 ["", "_DEF", "_ADJ", "_neutrality", "_neutrality_DEF",
+                  "_democratic", "_democratic_DEF", "_fascism", "_fascism_DEF",
+                  "_communism", "_communism_DEF"]}
+        delete_localisation_keys(zzz_mod, purge)
 
 
 def write_portrait_gfx(mod_root: Path, tag: str, portrait_slug: str) -> None:

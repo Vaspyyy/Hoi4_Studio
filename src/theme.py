@@ -705,6 +705,7 @@ TAB_ICONS = {
     "Welcome": "#b8963e",
     "Project": "#c9a74d",
     "Nation Designer": "#8a7030",
+    "Ideologies": "#9b59b6",
     "Focus Trees": "#9e8340",
     "National Spirits": "#5c7a3a",
     "Event Chains": "#b5443a",

@@ -73,9 +73,11 @@ def _excepthook(exc_type, exc_value, exc_tb):
 
 def build_crash_report(error_msg: str) -> str:
     """Build a formatted bug report with system info and recent log lines."""
-    # TODO: crash report may contain file paths with usernames or other PII.
-    # Add disclaimer that the user should review before submitting.
     parts = [
+        "⚠️  Review before submitting — this report may contain file paths,",
+        "usernames, or other personal information. Redact anything you don't",
+        "want to share, then paste into the issue body.",
+        "",
         "HOI4 Modding Studio Bug Report",
         "=" * 40,
         "",

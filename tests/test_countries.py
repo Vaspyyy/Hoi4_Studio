@@ -78,7 +78,7 @@ class TestWriteLocalisationCountry:
     def test_writes_localisation(self, tmp_path):
         paths = _make_paths(tmp_path)
         write_localisation_country(paths.mod_root, "ABC", "Testland", "Testlander")
-        f = paths.mod_root / "localisation/english/ABC_country_l_english.yml"
+        f = paths.mod_root / "localisation/english/zzz_ABC_country_l_english.yml"
         assert f.exists()
         content = f.read_text(encoding="utf-8-sig")
         assert "ABC:0" in content

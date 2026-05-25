@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QThread, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QSlider,
+    QSpinBox,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -626,7 +627,7 @@ class MapGeneratorTab(QWidget):
         default: int,
         step: int,
         tooltip: str = "",
-    ) -> tuple[QSlider, QLabel]:
+    ) -> tuple[QSlider, QSpinBox]:
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(min_val, max_val)
         slider.setValue(default)
@@ -634,10 +635,24 @@ class MapGeneratorTab(QWidget):
         slider.setPageStep(step * 5)
         if tooltip:
             slider.setToolTip(tooltip)
-        val_label = QLabel(str(default))
-        val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        slider.valueChanged.connect(lambda v: val_label.setText(str(v)))
-        return slider, val_label
+        spin = QSpinBox()
+        spin.setRange(min_val, max_val)
+        spin.setValue(default)
+        spin.setSingleStep(step)
+        spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if tooltip:
+            spin.setToolTip(tooltip)
+        slider.valueChanged.connect(spin.setValue)
+        spin.valueChanged.connect(slider.setValue)
+
+        class _Blocker(QObject):
+            def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+                if event.type() == QEvent.Type.Wheel:
+                    return True
+                return super().eventFilter(obj, event)
+        spin.installEventFilter(_Blocker(spin))
+
+        return slider, spin
 
     # ── quick start ───────────────────────────────────────────────────
 

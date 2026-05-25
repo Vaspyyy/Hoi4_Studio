@@ -38,7 +38,8 @@ def append_localisation(path: Path, entries: dict[str, str]) -> None:
 
     out = "".join(new_lines).rstrip() + "\n"
     for k in sorted(entries):
-        out += f' {k}:0 "{entries[k]}"\n'
+        v = entries[k].replace("\n", "\\n")
+        out += f' {k}:0 "{v}"\n'
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(out, encoding="utf-8-sig")
     tmp.replace(path)
@@ -95,5 +96,5 @@ def parse_english_localisation(loc_english_dir: Path) -> dict[str, str]:
                 continue
             m = YML_ENTRY_RE.match(line)
             if m:
-                out[m.group(1)] = m.group(2)
+                out[m.group(1)] = m.group(2).replace("\\n", "\n")
     return out

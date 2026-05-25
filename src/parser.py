@@ -3,6 +3,20 @@ HOI4 Modding Studio - Paradox Script Parser
 
 Tokenizer and parser for Paradox script files (.txt, .gfx, .mod, .yml).
 Handles nested braces, quoted strings, comments, and bare identifiers.
+
+TODO: Save Importer (src/save_importer.py)
+  HOI4 saves are 50-400 MB (uncompressed: 200 MB - 2 GB). This parser
+  loads the entire tree in memory — unusable for saves. Need a streaming
+  scanner that:
+  1. Byte-scans for top-level section boundaries (countries={, states={, date=)
+  2. Brace-extracts each section substring (extract_braced_block)
+  3. Feeds individual sub-blocks to the existing parser (1-20 MB each)
+  4. Writes extracted data as mod files via existing export functions
+
+  Easy targets: date, state history, country tags, equipment counts.
+  Medium: completed focuses (IDs only, not tree layout), technologies.
+  Hard/impossible: map pixels (not in saves), full focus tree definitions.
+  Binary/ironman saves: need external library (hoi4save) or binary decoder.
 """
 
 from __future__ import annotations

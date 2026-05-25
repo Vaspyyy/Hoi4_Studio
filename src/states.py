@@ -252,8 +252,10 @@ def read_state_properties(state_file: Path) -> dict:
             result["cores"] = cores
 
         vp_nodes = history.find_all("victory_points")
-        # TODO: victory points parsing logic is opaque ; document that VP blocks
-        # contain {int_1 int_2} {int_3} style nested nodes.
+        # Victory point blocks contain nested {int_1 int_2} {int_3} nodes.
+        # Example: victory_points = { 12345 { 5 } 67890 { 10 } }
+        # The first int is the province ID, the inner block's int is the VP value.
+        # We flatten all numeric values into a space-separated string for the UI.
         vp_parts: list[str] = []
         for vp in vp_nodes:
             if vp.is_block():

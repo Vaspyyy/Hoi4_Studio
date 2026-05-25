@@ -177,6 +177,11 @@ class MainWindow(QMainWindow):
 
             return MapGeneratorTab(self)
 
+        def _make_ideology():
+            from .tabs.ideology_tab import IdeologyTab
+
+            return IdeologyTab(self)
+
         def _make_bookmark():
             from .tabs.bookmark_tab import BookmarkTab
 
@@ -190,6 +195,7 @@ class MainWindow(QMainWindow):
             (self.welcome, None, "Welcome"),
             (self.project, None, "Project"),
             (_make_country, "Nation Designer"),
+            (_make_ideology, "Ideologies"),
             (_make_focus, "Focus Trees"),
             (_make_ideas, "National Spirits"),
             (_make_events, "Event Chains"),
@@ -200,6 +206,8 @@ class MainWindow(QMainWindow):
             (_make_map_gen, "Map Generator"),
             (_make_bookmark, "Bookmark Maker"),
         ]
+
+        self._tab_defs = tab_defs
 
         # Store tab references and factories for signal connections
         self._tab_refs: dict[str, QWidget | None] = {}
@@ -266,10 +274,6 @@ class MainWindow(QMainWindow):
         return self._ensure_tab_loaded("State Properties")
 
     def _setup_menus(self) -> None:
-        # TODO: Ctrl+1..Ctrl+9 shortcuts to jump to specific tabs.
-        # Register them dynamically from TAB_REGISTRY so new tabs get
-        # shortcuts automatically. Bind Ctrl+1→Welcome, Ctrl+2→Project, etc.
-        # Also add Alt+Left/Right as alternatives to Ctrl+Tab.
         menubar = self.menuBar()
 
         file_menu = menubar.addMenu("&File")
@@ -320,6 +324,28 @@ class MainWindow(QMainWindow):
         prev_tab.setShortcut(QKeySequence("Ctrl+Shift+Tab"))
         prev_tab.triggered.connect(self._prev_tab)
         view_menu.addAction(prev_tab)
+
+        alt_prev = QAction("Previous Tab", self)
+        alt_prev.setShortcut(QKeySequence("Alt+Left"))
+        alt_prev.triggered.connect(self._prev_tab)
+        view_menu.addAction(alt_prev)
+
+        alt_next = QAction("Next Tab", self)
+        alt_next.setShortcut(QKeySequence("Alt+Right"))
+        alt_next.triggered.connect(self._next_tab)
+        view_menu.addAction(alt_next)
+
+        # Ctrl+1..Ctrl+9 → jump to tab by index (first 9 tabs only)
+        for i, entry in enumerate(self._tab_defs[:9]):
+            if len(entry) == 3:
+                name = entry[2]
+            else:
+                name = entry[1]
+            jump = QAction(f"Switch to {name}", self)
+            jump.setShortcut(QKeySequence(f"Ctrl+{i+1}"))
+            idx = i
+            jump.triggered.connect(lambda checked, i=idx: self.tabs.setCurrentIndex(i))
+            self.addAction(jump)
 
         help_menu = menubar.addMenu("&Help")
         about_action = QAction("&About", self)
@@ -542,10 +568,10 @@ class _NoScrollFilter(QObject):
 
 
 def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
-    """Show a crash dialog with Send Bug Report and Open Log File buttons."""
-    # TODO: the crash dialog creates a new QApplication if one doesn't exist
-    # (line app = QApplication([])). This is fragile ; if there's truly no app,
-    # we can't show a Qt dialog at all. Fall back to printing to stderr.
+    """Show a crash dialog with Send Bug Report and Open Log File buttons.
+
+    Falls back to stderr when Qt is unavailable (headless / no display).
+    """
     import tomllib
     import webbrowser
 
@@ -576,10 +602,19 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
             QTextEdit,
             QVBoxLayout,
         )
+    except ImportError:
+        _print_crash_fallback(error_msg, log_file)
+        return
 
-        app = QApplication.instance()
-        if app is None:
+    app = QApplication.instance()
+    if app is None:
+        try:
             app = QApplication([])
+        except Exception:
+            _print_crash_fallback(error_msg, log_file)
+            return
+
+    try:
 
         dlg = QDialog()
         dlg.setWindowTitle("Something broke")
@@ -623,10 +658,11 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
             btn_send.setEnabled(False)
 
         def _open_log():
-            # TODO: add macOS handler via subprocess.run(["open", str(log_file)]).
             if log_file and log_file.exists():
                 if sys.platform == "win32":
                     os.startfile(str(log_file))
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", str(log_file)], check=False)
                 else:
                     subprocess.run(["xdg-open", str(log_file)], check=False)
 
@@ -662,12 +698,7 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
         )
         dlg.exec()
     except Exception:
-        if sys.platform == "win32":
-            import ctypes
-
-            ctypes.windll.user32.MessageBoxW(0, error_msg, "HOI4 Modding Studio - Error", 0x10)
-        else:
-            print(f"FATAL: {error_msg}", file=sys.stderr)
+        _print_crash_fallback(error_msg, log_file)
 
 
 def main():

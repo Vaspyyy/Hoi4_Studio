@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -22,10 +22,10 @@ from PySide6.QtWidgets import (
     QCheckBox,
 )
 
+from ..ideologies import parse_ideologies, resolve_sub_ideology_loc
 from ..theme import AnimatedButton, create_card_widget, create_section_title
 from ..tags import (
     load_vanilla_tags,
-    load_mod_tags,
     load_all_tags,
     add_country_tag,
     resolve_country_filename,
@@ -44,68 +44,28 @@ from ..widgets import ColorSwatch, IdeologySlider, ValidationMixin
 if TYPE_CHECKING:
     from ..main import MainWindow
 
-COLOR_RE = re.compile(r"\bcolor\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}")
+
+# regex helpers -----------------------------------------------------------
+
+
+COLOR_RE = re.compile(r"\bcolor\s*=\s*(?:rgb)?\s*\{?\s*(\d+)\s+(\d+)\s+(\d+)")
 CAPITAL_RE = re.compile(r"\bcapital\s*=\s*(\d+)")
-POP_RE = re.compile(r"\b(democratic|fascism|communism|neutrality)\s*=\s*(\d+)")
 RULING_PARTY_RE = re.compile(r"\bruling_party\s*=\s*(\w+)")
-IDEOLOGY_RE = re.compile(r"\bideology\s*=\s*(\w+)")
+IDEOLOGY_RE = re.compile(r"\bideology\s*=\s*(\S+)")
+POP_ENTRY_RE = re.compile(r"(\w+)\s*=\s*(\d+)")
 
 
-def _parse_ideologies(
-    hoi4_install: Optional[Path], mod_root: Optional[Path]
-) -> dict[str, list[str]]:
-    from ..parser import parse_pdx
-    from ..localisation import parse_english_localisation
+def _disable_scroll(widget: QWidget) -> None:
+    class _Blocker(QObject):
+        def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+            if event.type() == QEvent.Type.Wheel:
+                return True
+            return super().eventFilter(obj, event)
 
-    groups: dict[str, list[str]] = {}
-
-    for base in [hoi4_install, mod_root]:
-        if base is None:
-            continue
-        ideologies_dir = base / "common" / "ideologies"
-        if not ideologies_dir.is_dir():
-            continue
-        for f in sorted(ideologies_dir.glob("*.txt")):
-            try:
-                txt = f.read_text(encoding="utf-8", errors="ignore")
-                root = parse_pdx(txt)
-            except Exception:
-                continue
-            ideologies_node = root.find("ideologies")
-            if not ideologies_node or not ideologies_node.is_block():
-                continue
-            for group_node in ideologies_node.children:
-                if not group_node.key or group_node.is_comment:
-                    continue
-                group_name = group_node.key
-                types_node = group_node.find("types")
-                if not types_node or not types_node.is_block():
-                    continue
-                subs = []
-                for type_node in types_node.children:
-                    if type_node.key and not type_node.is_comment:
-                        subs.append(type_node.key)
-                groups[group_name] = subs
-
-    loc: dict[str, str] = {}
-    for base in [hoi4_install, mod_root]:
-        if base is None:
-            continue
-        loc_dir = base / "localisation" / "english"
-        loc.update(parse_english_localisation(loc_dir))
-
-    return groups
+    widget.installEventFilter(_Blocker(widget))
 
 
-def _resolve_sub_ideology_tooltip(sub_name: str, loc: dict[str, str]) -> str:
-    desc = loc.get(f"{sub_name}_desc", "")
-    display = loc.get(sub_name, sub_name)
-    if desc:
-        return f"{display}: {desc}"
-    return display
-
-
-def read_country_definition(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> dict:
+def _read_country_definition(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> dict:
     for base in [mod_root, hoi4_install]:
         if base is None:
             continue
@@ -118,7 +78,7 @@ def read_country_definition(mod_root: Path, tag: str, hoi4_install: Optional[Pat
     return {}
 
 
-def read_country_history(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> dict:
+def _read_country_history(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> dict:
     for base in [mod_root, hoi4_install]:
         if base is None:
             continue
@@ -153,9 +113,20 @@ def read_country_history(mod_root: Path, tag: str, hoi4_install: Optional[Path] 
                     if j - idx > 10:
                         break
 
-        pops = {k: 0 for k in ["democratic", "fascism", "communism", "neutrality"]}
-        for m in POP_RE.finditer(txt):
-            pops[m.group(1)] = int(m.group(2))
+        pops: dict[str, int] = {}
+        sp_idx = txt.find("set_popularities")
+        if sp_idx >= 0:
+            brace_idx = txt.find("{", sp_idx)
+            if brace_idx >= 0:
+                from ..parser import extract_braced_block
+
+                try:
+                    block, _ = extract_braced_block(txt, brace_idx + 1)
+                except ValueError:
+                    block = ""
+                for m in POP_ENTRY_RE.finditer(block):
+                    pops[m.group(1)] = int(m.group(2))
+
         rp = RULING_PARTY_RE.search(txt)
         return {
             "capital": int(cap.group(1)) if cap else 1,
@@ -166,11 +137,9 @@ def read_country_history(mod_root: Path, tag: str, hoi4_install: Optional[Path] 
     return {}
 
 
-def read_country_localisation(
-    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
+def _read_country_localisation(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None,
 ) -> dict:
-    # TODO: rglob over entire localisation dir decodes every .yml per tag lookup;
-    # cache parsed results or index by tag to avoid O(n*m) file I/O.
     for base in [mod_root, hoi4_install]:
         if base is None:
             continue
@@ -197,37 +166,40 @@ def read_country_localisation(
     return {}
 
 
-def read_character_ideology(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> str:
+def _read_character_ideology(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> str:
     for base in [mod_root, hoi4_install]:
         if base is None:
             continue
-        p = base / f"common/characters/{tag}_characters.txt"
-        if not p.exists():
-            continue
-        txt = p.read_text(encoding="utf-8", errors="ignore")
-        m = IDEOLOGY_RE.search(txt)
-        if m:
-            return m.group(1)
+        for fname in [f"{tag}_characters.txt", f"{tag}.txt"]:
+            p = base / f"common/characters/{fname}"
+            if not p.exists():
+                continue
+            txt = p.read_text(encoding="utf-8", errors="ignore")
+            m = IDEOLOGY_RE.search(txt)
+            if m:
+                return m.group(1)
     return ""
 
 
-def read_character_leader_name(
-    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
+def _read_character_leader_name(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None,
 ) -> str:
     for base in [mod_root, hoi4_install]:
         if base is None:
             continue
-        p = base / f"common/characters/{tag}_characters.txt"
-        if not p.exists():
-            continue
-        txt = p.read_text(encoding="utf-8", errors="ignore")
-        m = re.search(r'name\s*=\s*"([^"]*)"', txt)
-        if m:
-            return m.group(1)
+        for fname in [f"{tag}_characters.txt", f"{tag}.txt"]:
+            p = base / f"common/characters/{fname}"
+            if not p.exists():
+                continue
+            txt = p.read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r'name\s*=\s*"([^"]*)"', txt)
+            if m:
+                return m.group(1)
     return ""
 
 
 class CountryTab(QWidget):
+
     def __init__(self, mw: "MainWindow"):
         super().__init__()
         self.mw = mw
@@ -286,6 +258,7 @@ class CountryTab(QWidget):
         self.capital.setToolTip("State ID of the capital province")
         layout.addWidget(QLabel("Capital State ID"))
         layout.addWidget(self.capital)
+        _disable_scroll(self.capital)
 
         rowc = QHBoxLayout()
         self.color_preview = QLineEdit("10,80,200")
@@ -298,31 +271,26 @@ class CountryTab(QWidget):
         layout.addLayout(rowc)
 
         layout.addWidget(QLabel("Politics (sum auto-normalized to 100%)"))
-        self.s_dem = IdeologySlider("democratic", 60)
-        self.s_fas = IdeologySlider("fascism", 5)
-        self.s_com = IdeologySlider("communism", 10)
-        self.s_neu = IdeologySlider("neutrality", 25)
 
-        for s in [self.s_dem, self.s_fas, self.s_com, self.s_neu]:
-            s.value_changed.connect(self.normalize)
-            layout.addWidget(s)
+        self._ideo_sliders: list[IdeologySlider] = []
+        self._ideo_layout = QVBoxLayout()
+        layout.addLayout(self._ideo_layout)
 
         self.sum_lbl = QLabel("Sum: 100")
         layout.addWidget(self.sum_lbl)
-        self.normalize()
 
         self.ruling_party = QComboBox()
-        self.ruling_party.addItems(["democratic", "neutrality", "fascism", "communism"])
         self.ruling_party.setToolTip("Which ideology holds power at game start")
         self.ruling_party.currentTextChanged.connect(self._update_sub_ideologies)
         layout.addWidget(QLabel("Ruling Party"))
         layout.addWidget(self.ruling_party)
+        _disable_scroll(self.ruling_party)
 
         self.leader_ideology = QComboBox()
-        self._update_sub_ideologies("democratic")
         self.leader_ideology.setToolTip("Leader's sub-ideology. Must match the ruling party group.")
         layout.addWidget(QLabel("Leader Sub-Ideology"))
         layout.addWidget(self.leader_ideology)
+        _disable_scroll(self.leader_ideology)
 
         layout.addWidget(QLabel("Flag"))
         rf = QHBoxLayout()
@@ -375,7 +343,7 @@ class CountryTab(QWidget):
         self.leader_ideology.clear()
         subs = self._ideology_groups.get(ruling_party, [])
         for sub_name in subs:
-            tooltip = _resolve_sub_ideology_tooltip(sub_name, self._ideology_loc)
+            tooltip = resolve_sub_ideology_loc(sub_name, self._ideology_loc)
             self.leader_ideology.addItem(sub_name)
             idx = self.leader_ideology.count() - 1
             self.leader_ideology.setItemData(idx, tooltip, Qt.ItemDataRole.ToolTipRole)
@@ -397,7 +365,10 @@ class CountryTab(QWidget):
             return
         self._normalizing = True
 
-        sliders = [self.s_dem, self.s_fas, self.s_com, self.s_neu]
+        sliders = self._ideo_sliders
+        if not sliders:
+            self._normalizing = False
+            return
         source = None
         for s in sliders:
             if s._ideology == ideology:
@@ -457,7 +428,16 @@ class CountryTab(QWidget):
         mod = self.mw.paths.mod_root if self.mw.paths else None
         for t in load_all_tags(hoi4, mod):
             self.tag_picker.addItem(t)
-        self._ideology_groups = _parse_ideologies(hoi4, mod)
+
+        # --- parse ideologies and rebuild UI ---
+        ideologies = parse_ideologies(hoi4, mod)
+        from ..effects_catalog import refresh_effect_catalog
+
+        refresh_effect_catalog(ideologies)
+        self._ideology_groups = {}
+        for key, ideo in ideologies.items():
+            self._ideology_groups[key] = [sub.name for sub in ideo.types]
+
         from ..localisation import parse_english_localisation
 
         loc: dict[str, str] = {}
@@ -466,6 +446,39 @@ class CountryTab(QWidget):
         if mod:
             loc.update(parse_english_localisation(mod / "localisation" / "english"))
         self._ideology_loc = loc
+
+        # rebuild ruling party combo
+        rp = self.ruling_party.currentText()
+        self.ruling_party.blockSignals(True)
+        self.ruling_party.clear()
+        for key in sorted(ideologies):
+            self.ruling_party.addItem(key)
+        idx = self.ruling_party.findText(rp)
+        self.ruling_party.setCurrentIndex(idx if idx >= 0 else 0)
+        self.ruling_party.blockSignals(False)
+
+        # rebuild ideology sliders
+        old_pops = {}
+        for s in self._ideo_sliders:
+            old_pops[s._ideology] = s.value()
+            s.value_changed.disconnect()
+            s.deleteLater()
+        self._ideo_sliders.clear()
+        # clear layout
+        while self._ideo_layout.count():
+            w = self._ideo_layout.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+
+        defaults = {"democratic": 60, "fascism": 5, "communism": 10, "neutrality": 25}
+        for key in sorted(ideologies):
+            default = old_pops.get(key, defaults.get(key, 25))
+            s = IdeologySlider(key, default)
+            s.value_changed.connect(self.normalize)
+            self._ideo_sliders.append(s)
+            self._ideo_layout.addWidget(s)
+
+        self.normalize()
         self._update_sub_ideologies(self.ruling_party.currentText())
 
     def load_selected(self):
@@ -479,19 +492,19 @@ class CountryTab(QWidget):
         mod = self.mw.paths.mod_root
         vanilla_tags = load_vanilla_tags(hoi4)
         self.override_vanilla.setChecked(tag in vanilla_tags)
-        d = read_country_definition(mod, tag, hoi4)
+        d = _read_country_definition(mod, tag, hoi4)
         if "color" in d:
             r, g, b = d["color"]
             self.color_preview.setText(f"{r},{g},{b}")
             self.color_swatch.set_color(r, g, b)
-        h = read_country_history(mod, tag, hoi4)
+        h = _read_country_history(mod, tag, hoi4)
         if "capital" in h:
             self.capital.setValue(int(h["capital"]))
         pops = h.get("popularities", {})
-        self.s_dem.setValue(int(pops.get("democratic", 0)))
-        self.s_fas.setValue(int(pops.get("fascism", 0)))
-        self.s_com.setValue(int(pops.get("communism", 0)))
-        self.s_neu.setValue(int(pops.get("neutrality", 0)))
+        self._normalizing = True
+        for s in self._ideo_sliders:
+            s.setValue(int(pops.get(s._ideology, 0)))
+        self._normalizing = False
         self.normalize()
         rp = h.get("ruling_party", "democratic")
         idx = self.ruling_party.findText(rp)
@@ -500,19 +513,21 @@ class CountryTab(QWidget):
         else:
             self.ruling_party.setCurrentIndex(0)
 
-        char_ideology = read_character_ideology(mod, tag, hoi4)
+        char_ideology = _read_character_ideology(mod, tag, hoi4)
         if char_ideology:
             self._update_sub_ideologies(self.ruling_party.currentText())
             sub_idx = self.leader_ideology.findText(char_ideology)
             if sub_idx >= 0:
                 self.leader_ideology.setCurrentIndex(sub_idx)
-        loc = read_country_localisation(mod, tag, hoi4)
+        loc = _read_country_localisation(mod, tag, hoi4)
         if loc.get("name"):
             self.name.setText(loc["name"])
         if loc.get("adj"):
             self.adj.setText(loc["adj"])
 
-        leader_name = read_character_leader_name(mod, tag, hoi4)
+        leader_name = _read_character_leader_name(mod, tag, hoi4)
+        if not leader_name:
+            leader_name = h.get("leader_name", "")
         if leader_name:
             self.leader.setText(leader_name)
 
@@ -579,12 +594,7 @@ class CountryTab(QWidget):
 
         try:
             r, g, b = [int(x.strip()) for x in self.color_preview.text().split(",")]
-            pops = {
-                "democratic": self.s_dem.value(),
-                "fascism": self.s_fas.value(),
-                "communism": self.s_com.value(),
-                "neutrality": self.s_neu.value(),
-            }
+            pops = {s._ideology: s.value() for s in self._ideo_sliders}
             create_mod_structure(self.mw.paths)
             if not is_vanilla:
                 add_country_tag(self.mw.paths.mod_root, tag)

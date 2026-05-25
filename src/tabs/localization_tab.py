@@ -118,7 +118,12 @@ class LocalizationManagerTab(QWidget):
         value = self.value.text().strip()
         if not key:
             return
-        loc_file = self.mw.paths.mod_root / "localisation/english/mod_localisation_l_english.yml"
+        loc_file = self.mw.paths.mod_root / "localisation/english/zzz_mod_localisation_l_english.yml"
+        # Migrate old file content if it exists.
+        old_file = self.mw.paths.mod_root / "localisation/english/mod_localisation_l_english.yml"
+        if old_file.exists() and not loc_file.exists():
+            loc_file.write_text(old_file.read_text(encoding="utf-8"), encoding="utf-8")
+            old_file.unlink()
         append_localisation(loc_file, {key: value})
         self.refresh_localization_entries()
         if self.mw:
@@ -131,7 +136,11 @@ class LocalizationManagerTab(QWidget):
         if not key or key not in self.entries:
             return
         del self.entries[key]
-        loc_file = self.mw.paths.mod_root / "localisation/english/mod_localisation_l_english.yml"
+        loc_file = self.mw.paths.mod_root / "localisation/english/zzz_mod_localisation_l_english.yml"
+        old_file = self.mw.paths.mod_root / "localisation/english/mod_localisation_l_english.yml"
+        if old_file.exists() and not loc_file.exists():
+            loc_file.write_text(old_file.read_text(encoding="utf-8"), encoding="utf-8")
+            old_file.unlink()
         delete_localisation_keys(loc_file, {key})
         self.refresh_localization_entries()
         if self.mw:

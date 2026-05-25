@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtGui import QDoubleValidator, QIntValidator, QRegularExpressionValidator, QValidator
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -24,9 +25,42 @@ if TYPE_CHECKING:
     from ..main import MainWindow
 
 
+class TagValidator(QValidator):
+    def validate(self, text: str, pos: int) -> object:
+        if not text:
+            return QValidator.State.Intermediate, text, pos
+        upper = text.upper()
+        if len(upper) > 3:
+            return QValidator.State.Invalid, text, pos
+        for c in upper:
+            if c < "A" or c > "Z":
+                return QValidator.State.Invalid, text, pos
+        if len(upper) == 3:
+            return QValidator.State.Acceptable, upper, pos
+        return QValidator.State.Intermediate, upper, pos
+
+
+class CommaTagValidator(QValidator):
+    def validate(self, text: str, pos: int) -> object:
+        if not text:
+            return QValidator.State.Acceptable, text, pos
+        for c in text.upper():
+            if not ("A" <= c <= "Z" or c == "," or c == " "):
+                return QValidator.State.Invalid, text, pos
+        return QValidator.State.Acceptable, text.upper(), pos
+
+
+class VictoryPointsValidator(QValidator):
+    def validate(self, text: str, pos: int) -> object:
+        if not text:
+            return QValidator.State.Acceptable, text, pos
+        for c in text:
+            if not (c.isdigit() or c == " "):
+                return QValidator.State.Invalid, text, pos
+        return QValidator.State.Acceptable, text, pos
+
+
 class StatePropertiesTab(QWidget):
-    # TODO: no validation for owner TAG (3 letters), core TAGs, victory points
-    # (positive ints), or manpower (positive int). Invalid values written silently.
     def __init__(self, mw: "MainWindow"):
         super().__init__()
         self.mw = mw
@@ -48,6 +82,8 @@ class StatePropertiesTab(QWidget):
         form_layout = QFormLayout()
 
         self.owner_input = QLineEdit()
+        self.owner_input.setMaxLength(3)
+        self.owner_input.setValidator(TagValidator(self.owner_input))
         self.owner_input.setToolTip("3-letter country tag that owns this state")
         form_layout.addRow("Owner (TAG):", self.owner_input)
 
@@ -60,6 +96,7 @@ class StatePropertiesTab(QWidget):
         form_layout.addRow("", self.is_dz_checkbox)
 
         self.cores_input = QLineEdit()
+        self.cores_input.setValidator(CommaTagValidator(self.cores_input))
         self.cores_input.setToolTip(
             "Country tags with cores on this state, comma-separated (e.g., GER,AUT)"
         )
@@ -73,14 +110,19 @@ class StatePropertiesTab(QWidget):
 
         self.victory_points_input = QLineEdit()
         self.victory_points_input.setPlaceholderText("e.g. 10 5 3 2")
+        self.victory_points_input.setValidator(VictoryPointsValidator(self.victory_points_input))
         self.victory_points_input.setToolTip("Victory point values for provinces in this state")
         form_layout.addRow("Victory Points:", self.victory_points_input)
 
         self.manpower_input = QLineEdit()
+        self.manpower_input.setValidator(QIntValidator(0, 99999999, self.manpower_input))
         self.manpower_input.setToolTip("Manpower value for this state (e.g., 50000)")
         form_layout.addRow("Manpower:", self.manpower_input)
 
         self.buildings_max_level_factor_input = QLineEdit()
+        self.buildings_max_level_factor_input.setValidator(
+            QDoubleValidator(0.0, 1.0, 2, self.buildings_max_level_factor_input)
+        )
         self.buildings_max_level_factor_input.setToolTip(
             "Multiplier for maximum building levels (0.0 to 1.0)"
         )
@@ -188,6 +230,12 @@ class StatePropertiesTab(QWidget):
             return
 
         try:
+            owner = self.owner_input.text().strip()
+            if owner and len(owner) != 3:
+                self.status_label.setText("Error: Owner TAG must be exactly 3 letters")
+                self.mw.log_panel.log("Owner TAG must be 3 letters", "error")
+                return
+
             cores_text = self.cores_input.text().strip()
             cores_list = (
                 [tag.strip().upper() for tag in cores_text.split(",") if tag.strip()]

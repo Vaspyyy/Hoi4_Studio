@@ -33,6 +33,9 @@ class AppSettings:
     window_width: int = 1400
     window_height: int = 850
     editor_state_file: str = ""
+    map_ocean_r: int = 30
+    map_ocean_g: int = 80
+    map_ocean_b: int = 160
 
 
 @dataclass

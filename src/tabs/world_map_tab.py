@@ -8,9 +8,13 @@ definition.csv, history/states/*.txt, and common/countries/*.txt files.
 from __future__ import annotations
 
 import csv
+import io
+import logging
 import re
 import subprocess
+import time
 from colorsys import hsv_to_rgb
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -32,10 +36,12 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
+    QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsPixmapItem,
     QGraphicsRectItem,
     QGraphicsScene,
+    QGraphicsSimpleTextItem,
     QGraphicsView,
     QHBoxLayout,
     QLabel,
@@ -79,8 +85,25 @@ def _fingerprint_dir(d: Path) -> Optional[tuple]:
 
 @dataclass
 class _MapCache:
-    # TODO: document caching strategy ; 14 fields with no explanation of which
-    # fingerprint maps to which field, and when cache invalidation triggers.
+    """In-memory cache for expensive map data.
+
+    Each substructure is paired with a *fingerprint* (_fp field) — a hashable
+    value derived from the source file(s) that produced the data. On access, the
+    fingerprint is compared; a mismatch triggers a fresh load. This avoids
+    re-parsing unchanged game files across renders.
+
+    Fields
+    ------
+    provinces_arr, provinces_fp    : province bitmap → (width, height, mtime)
+    rgb_to_prov, definition_fp     : RGB→provID map → definition.csv mtime
+    prov_to_state, state_owner     : province/state mapping → state files mtime
+    state_names, states_fp         : state name lookup
+    localisation, loc_fp           : localisation strings → loc file mtimes
+    ocean_texture, ocean_fp        : ocean water colormap → DDS mtime
+    rivers_mask, rivers_fp         : river overlay → river BMP mtime
+    border_mask                    : province border overlay (recomputed from provinces_arr)
+    country_colors, colors_fp      : TAG→(r,g,b) → colors.txt / country files mtime
+    """
     provinces_arr: Optional[np.ndarray] = None
     provinces_fp: Optional[tuple] = None
     rgb_to_prov: Optional[dict] = None
@@ -89,6 +112,9 @@ class _MapCache:
     state_owner: Optional[dict] = None
     state_names: Optional[dict] = None
     states_fp: Optional[tuple] = None
+    vp_data: Optional[dict[int, int]] = None
+    prov_centers: Optional[dict[int, tuple[float, float]]] = None
+    prov_names: Optional[dict[int, str]] = None
     localisation: Optional[dict] = None
     loc_fp: Optional[tuple] = None
     ocean_texture: Optional[np.ndarray] = None
@@ -193,10 +219,11 @@ def _parse_country_colors(
 
 def _parse_state_owners(
     states_dirs: list[Path],
-) -> tuple[dict[int, str], dict[int, int], dict[int, str]]:
+) -> tuple[dict[int, str], dict[int, int], dict[int, str], dict[int, int]]:
     owner_map: dict[int, str] = {}
     prov_to_state: dict[int, int] = {}
     state_names: dict[int, str] = {}
+    vp_data: dict[int, int] = {}
 
     for states_dir in states_dirs:
         if not states_dir.is_dir():
@@ -248,7 +275,60 @@ def _parse_state_owners(
                         except ValueError:
                             continue
 
-    return owner_map, prov_to_state, state_names
+            # victory points: history → victory_points = { PID VP PID VP ... }
+            if history:
+                vp_block = history.get_block("victory_points")
+                if vp_block:
+                    parts: list[int] = []
+                    for vc in vp_block.children:
+                        if vc.value:
+                            try:
+                                parts.append(int(vc.value))
+                            except ValueError:
+                                continue
+                    for i in range(0, len(parts) - 1, 2):
+                        pid, val = parts[i], parts[i + 1]
+                        if pid not in vp_data or val > vp_data.get(pid, 0):
+                            vp_data[pid] = val
+
+    return owner_map, prov_to_state, state_names, vp_data
+
+
+def _compute_prov_centers(
+    provinces_arr: "np.ndarray",
+    rgb_to_prov: dict[tuple[int, int, int], int],
+) -> dict[int, tuple[float, float]]:
+    """Single-pass O(H×W) centroid computation via LUT + bincount.
+
+    Replaces the original O(N×H×W) per-province np.where() loop
+    which became unusable on maps with >10 000 provinces.
+    """
+    max_pid = max(rgb_to_prov.values(), default=0) + 1
+
+    pid_lut = np.full((256, 256, 256), -1, dtype=np.int32)
+    for (r, g, b), pid in rgb_to_prov.items():
+        pid_lut[r, g, b] = pid
+
+    pid_img = pid_lut[
+        provinces_arr[:, :, 0],
+        provinces_arr[:, :, 1],
+        provinces_arr[:, :, 2],
+    ]
+
+    valid = pid_img >= 0
+    pid_flat = pid_img[valid]
+    ys, xs = np.where(valid)
+
+    xsums = np.bincount(pid_flat, weights=xs, minlength=max_pid)
+    ysums = np.bincount(pid_flat, weights=ys, minlength=max_pid)
+    counts = np.bincount(pid_flat, minlength=max_pid)
+
+    centers: dict[int, tuple[float, float]] = {}
+    for pid in rgb_to_prov.values():
+        n = counts[pid]
+        if n > 0:
+            centers[pid] = (float(xsums[pid] / n), float(ysums[pid] / n))
+    return centers
 
 
 def _resolve_colors(
@@ -296,24 +376,25 @@ def _load_water_texture(
         if not dds_path.exists():
             continue
         try:
-            # TODO: ImageMagick subprocess has 30s timeout with no stderr logging ;
-            # if magick hangs (common with corrupt DDS) the map render blocks silently.
-            # Also, use _have_magick() result to pick magick vs convert binary.
-            # TODO: FileNotFoundError from missing "magick" is caught by outer try/except
-            # before the convert fallback on line ~290 runs ; use _magick_bin() helper.
             result = subprocess.run(
                 ["magick", "convert", str(dds_path), "-resize", f"{w}x{h}!", "bmp:-"],
                 capture_output=True,
                 timeout=30,
             )
             if result.returncode != 0:
+                _wl.debug("ImageMagick stderr: %s", result.stderr.decode(errors="replace").strip()[:500])
                 result = subprocess.run(
                     ["convert", str(dds_path), "-resize", f"{w}x{h}!", "bmp:-"],
                     capture_output=True,
                     timeout=30,
                 )
             if result.returncode != 0:
-                _wl.debug("ImageMagick failed to decode %s (rc=%d)", dds_path, result.returncode)
+                _wl.debug(
+                    "ImageMagick failed to decode %s (rc=%d, stderr=%s)",
+                    dds_path,
+                    result.returncode,
+                    result.stderr.decode(errors="replace").strip()[:500],
+                )
                 continue
             from io import BytesIO
 
@@ -362,6 +443,7 @@ def _render_political_map(
     progress_cb=None,
     ocean_texture: Optional[np.ndarray] = None,
     provinces_arr: Optional[np.ndarray] = None,
+    ocean_color: tuple[int, int, int] = (30, 80, 160),
 ) -> tuple[np.ndarray, int, int]:
     if provinces_arr is not None:
         arr = provinces_arr
@@ -374,12 +456,11 @@ def _render_political_map(
     all_tags = set(state_owner.values())
     resolved_colors = _resolve_colors(country_colors, all_tags)
 
-    # TODO: 50MB 3D LUT (256x256x256x3) allocated per render ; cache it or
-    # use a sparse approach to avoid OOM on systems with <8GB RAM.
-    lut = np.full((256, 256, 256, 3), 30, dtype=np.uint8)
-    # TODO: ocean fallback color [30,80,160] hardcoded ; make configurable via settings.
-    lut[:, :, 1] = 80
-    lut[:, :, 2] = 160
+    # Ocean fallback color — configurable via AppSettings.map_ocean_r/g/b.
+    ocean_r, ocean_g, ocean_b = ocean_color
+    lut = np.full((256, 256, 256, 3), ocean_r, dtype=np.uint8)
+    lut[:, :, 1] = ocean_g
+    lut[:, :, 2] = ocean_b
 
     is_ocean = np.ones((256, 256, 256), dtype=np.bool_)
 
@@ -448,6 +529,7 @@ class MapRenderWorker(QThread):
         hoi4_install: Optional[Path] = None,
         loc_dirs: Optional[list[Path]] = None,
         cache: Optional[_MapCache] = None,
+        ocean_color: tuple[int, int, int] = (30, 80, 160),
         parent=None,
     ):
         super().__init__(parent)
@@ -458,6 +540,7 @@ class MapRenderWorker(QThread):
         self.mod_root = mod_root
         self.hoi4_install = hoi4_install
         self.loc_dirs = loc_dirs or []
+        self.ocean_color = ocean_color
         self._cache = cache
 
         self.provinces_arr: Optional[np.ndarray] = None
@@ -465,6 +548,9 @@ class MapRenderWorker(QThread):
         self.prov_to_state: dict = {}
         self.state_owner: dict = {}
         self.state_names: dict = {}
+        self.vp_data: dict[int, int] = {}
+        self.prov_centers: dict[int, tuple[float, float]] = {}
+        self.prov_names: dict[int, str] = {}
         self.localisation: dict[str, str] = {}
         self.clean_arr: Optional[np.ndarray] = None
         self.bordered_arr: Optional[np.ndarray] = None
@@ -476,28 +562,47 @@ class MapRenderWorker(QThread):
         try:
             cache = self._cache
 
-            if cache and cache.rgb_to_prov is not None:
-                rgb_to_prov = cache.rgb_to_prov
-            else:
-                rgb_to_prov = _parse_definition_csv(self.definition_csv_path)
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                fut_def = None
+                fut_states = None
+                fut_prov = None
 
-            if cache and cache.state_owner is not None:
-                state_owner = cache.state_owner
-                prov_to_state = cache.prov_to_state
-                state_names = cache.state_names
-            else:
-                state_owner, prov_to_state, state_names_raw = _parse_state_owners(self.states_dirs)
-                loc = self._resolve_localisation()
-                state_names = {}
-                for sid, key in state_names_raw.items():
-                    state_names[sid] = loc.get(key, key)
-                self.localisation = loc
+                if cache and cache.rgb_to_prov is not None:
+                    rgb_to_prov = cache.rgb_to_prov
+                else:
+                    fut_def = pool.submit(_parse_definition_csv, self.definition_csv_path)
 
-            if cache and cache.provinces_arr is not None:
-                self.provinces_arr = cache.provinces_arr
-            else:
-                img = Image.open(self.provinces_bmp_path).convert("RGB")
-                self.provinces_arr = np.array(img, dtype=np.uint8)
+                if cache and cache.state_owner is not None:
+                    state_owner = cache.state_owner
+                    prov_to_state = cache.prov_to_state
+                    state_names = cache.state_names
+                    self.vp_data = cache.vp_data or {}
+                    self.prov_names = cache.prov_names or {}
+                else:
+                    fut_states = pool.submit(_parse_state_owners, self.states_dirs)
+
+                if cache and cache.provinces_arr is not None:
+                    self.provinces_arr = cache.provinces_arr
+                else:
+                    fut_prov = pool.submit(self._load_provinces_bmp)
+
+                if fut_def:
+                    rgb_to_prov = fut_def.result()
+                if fut_states:
+                    state_owner, prov_to_state, state_names_raw, vp_data = fut_states.result()
+                    self.vp_data = vp_data
+                    loc = self._resolve_localisation()
+                    state_names = {}
+                    for sid, key in state_names_raw.items():
+                        state_names[sid] = loc.get(key, key)
+                    self.localisation = loc
+                    self.prov_names = {
+                        int(k[4:]): v.strip('"').split('"')[0] if '"' in v else v.strip()
+                        for k, v in loc.items()
+                        if k.startswith("PROV") and k[4:].isdigit()
+                    }
+                if fut_prov:
+                    self.provinces_arr = fut_prov.result()
 
             h, w = self.provinces_arr.shape[:2]
 
@@ -506,17 +611,25 @@ class MapRenderWorker(QThread):
             self.prov_to_state = prov_to_state
             self.state_names = state_names
 
-            if cache and cache.ocean_texture is not None:
-                ocean_texture = cache.ocean_texture
-            elif self.mod_root:
-                # Only fall back to vanilla ocean texture when the mod
-                # doesn't have its own provinces.bmp ; vanilla Earth
-                # ocean patterns look wrong on custom/generated maps.
-                has_custom_map = (self.mod_root / "map" / "provinces.bmp").exists()
-                ocean_texture = _load_water_texture(
-                    self.mod_root, h, w,
-                    hoi4_install=None if has_custom_map else self.hoi4_install,
-                )
+            if cache and cache.prov_centers is not None:
+                self.prov_centers = cache.prov_centers
+            elif self.provinces_arr is not None:
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    fut_centers = pool.submit(_compute_prov_centers, self.provinces_arr, rgb_to_prov)
+
+                    if cache and cache.ocean_texture is not None:
+                        ocean_texture = cache.ocean_texture
+                    elif self.mod_root:
+                        has_custom_map = (self.mod_root / "map" / "provinces.bmp").exists()
+                        ocean_texture = _load_water_texture(
+                            self.mod_root, h, w,
+                            hoi4_install=None if has_custom_map else self.hoi4_install,
+                        )
+                    else:
+                        ocean_texture = None
+
+                    self.prov_centers = fut_centers.result()
+
             else:
                 ocean_texture = None
             self.ocean_texture = ocean_texture
@@ -533,6 +646,7 @@ class MapRenderWorker(QThread):
                 progress_cb=_progress,
                 ocean_texture=ocean_texture,
                 provinces_arr=self.provinces_arr,
+                ocean_color=self.ocean_color,
             )
 
             if cache and cache.border_mask is not None and cache.provinces_arr is not None:
@@ -561,6 +675,10 @@ class MapRenderWorker(QThread):
             self.finished.emit(clean_img, bordered_img, num_states, num_countries, num_unassigned)
         except Exception as e:
             self.error.emit(str(e))
+
+    def _load_provinces_bmp(self) -> "np.ndarray":
+        img = Image.open(self.provinces_bmp_path).convert("RGB")
+        return np.array(img, dtype=np.uint8)
 
     def _resolve_localisation(self) -> dict[str, str]:
         from ..localisation import parse_english_localisation
@@ -897,6 +1015,13 @@ class MapGraphicsView(QGraphicsView):
         self._label_worker: Optional[LabelComputeWorker] = None
         self._cached_regions: Optional[list[tuple[str, list[tuple[float, float]], float]]] = None
 
+        self._show_vp = False
+        self._vp_map: dict[int, int] = {}
+        self._prov_centers: dict[int, tuple[float, float]] = {}
+        self._prov_names: dict[int, str] = {}
+        self._vp_items: list[QGraphicsEllipseItem] = []
+        self._vp_text_items: list[QGraphicsSimpleTextItem] = []
+
     def set_view_states(self, enabled: bool) -> None:
         self._view_states = enabled
         self._refresh_display()
@@ -912,6 +1037,61 @@ class MapGraphicsView(QGraphicsView):
             self._rebuild_labels()
         else:
             self._clear_labels()
+
+    def set_vp_data(
+        self,
+        vp_map: dict[int, int],
+        prov_centers: dict[int, tuple[float, float]],
+    ) -> None:
+        self._vp_map = vp_map
+        self._prov_centers = prov_centers
+        if self._show_vp:
+            self._rebuild_vp_overlay()
+
+    def set_prov_names(self, names: dict[int, str]) -> None:
+        self._prov_names = names
+        if self._show_vp and self._vp_show_names:
+            self._rebuild_vp_overlay()
+
+    def set_vp_enabled(self, enabled: bool) -> None:
+        self._show_vp = enabled
+        if enabled:
+            self._rebuild_vp_overlay()
+        else:
+            self._clear_vp_overlay()
+
+    def _rebuild_vp_overlay(self) -> None:
+        self._clear_vp_overlay()
+        if not self._vp_map or not self._prov_centers:
+            return
+        for pid, value in self._vp_map.items():
+            center = self._prov_centers.get(pid)
+            if center is None:
+                continue
+            cx, cy = center
+            dot = QGraphicsEllipseItem(cx - 4, cy - 4, 8, 8)
+            dot.setBrush(QColor(255, 215, 0))
+            dot.setPen(QPen(QColor(180, 130, 0), 1))
+            dot.setZValue(100)
+            dot.setToolTip(f"Province {pid} — VP: {value}")
+            self._scene.addItem(dot)
+            self._vp_items.append(dot)
+            if value > 1:
+                label = QGraphicsSimpleTextItem(str(value))
+                label.setPos(cx + 6, cy - 5)
+                label.setBrush(QColor(255, 215, 0))
+                label.setFont(QFont("Maple Mono", 9, QFont.Weight.Bold))
+                label.setZValue(101)
+                self._scene.addItem(label)
+                self._vp_text_items.append(label)
+
+    def _clear_vp_overlay(self) -> None:
+        for item in self._vp_items:
+            self._scene.removeItem(item)
+        self._vp_items.clear()
+        for item in self._vp_text_items:
+            self._scene.removeItem(item)
+        self._vp_text_items.clear()
 
     def set_localisation(self, loc: dict[str, str]) -> None:
         self._localisation = loc
@@ -1364,16 +1544,14 @@ class MapGraphicsView(QGraphicsView):
 
 
 class CountryLegendWidget(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, border_color: str = "#555", parent=None):
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(4, 4, 4, 4)
         self._layout.setSpacing(2)
-        # TODO: hardcoded "dark" theme assumption ; pass a is_dark flag or
-        # ThemeColors from WorldMapTab so swatch borders adapt to theme.
         self._label_stylesheet = "font-weight: 700; font-size: 13px; padding: 4px 0;"
         self._name_stylesheet = "font-size: 12px;"
-        self._border_color = "#555"
+        self._border_color = border_color
         self._layout.addStretch()
 
     def update_legend(
@@ -1485,6 +1663,10 @@ class WorldMapTab(QWidget):
         self.cb_rivers.setToolTip("Overlay rivers from map/rivers.bmp")
         self.cb_rivers.toggled.connect(self._toggle_rivers)
         top.addWidget(self.cb_rivers)
+        self.cb_vp = QCheckBox("Show Victory Points")
+        self.cb_vp.setToolTip("Overlay victory point markers on provinces")
+        self.cb_vp.toggled.connect(self.map_view.set_vp_enabled)
+        top.addWidget(self.cb_vp)
         self.cb_labels = QCheckBox("Show Labels")
         self.cb_labels.setToolTip("Display country names on the map")
         self.cb_labels.toggled.connect(self.map_view.set_labels_enabled)
@@ -1509,7 +1691,7 @@ class WorldMapTab(QWidget):
         legend_scroll.setWidgetResizable(True)
         legend_scroll.setMinimumWidth(180)
         legend_scroll.setMaximumWidth(280)
-        self.legend = CountryLegendWidget()
+        self.legend = CountryLegendWidget(border_color=self._colors.border)
         legend_scroll.setWidget(self.legend)
         splitter.addWidget(legend_scroll)
 
@@ -1755,6 +1937,11 @@ class WorldMapTab(QWidget):
             hoi4_install=hoi4_install,
             loc_dirs=loc_dirs,
             cache=worker_cache,
+            ocean_color=(
+                self.mw.settings.map_ocean_r,
+                self.mw.settings.map_ocean_g,
+                self.mw.settings.map_ocean_b,
+            ),
         )
         self._worker.finished.connect(self._on_render_finished)
         self._worker.error.connect(self._on_render_error)
@@ -1784,6 +1971,13 @@ class WorldMapTab(QWidget):
                 self._worker.state_names,
                 self._worker.localisation,
             )
+            self.map_view.set_vp_data(
+                getattr(self._worker, "vp_data", {}),
+                getattr(self._worker, "prov_centers", {}),
+            )
+            self.map_view.set_prov_names(
+                getattr(self._worker, "prov_names", {}),
+            )
             if self._worker.clean_arr is not None:
                 self.map_view.set_render_arrays(
                     self._worker.clean_arr,
@@ -1797,6 +1991,8 @@ class WorldMapTab(QWidget):
             if "provinces" in fps:
                 c.provinces_fp = fps["provinces"]
                 c.provinces_arr = self._worker.provinces_arr
+                c.prov_centers = self._worker.prov_centers
+                c.prov_names = getattr(self._worker, "prov_names", {})
             if "definition" in fps:
                 c.definition_fp = fps["definition"]
                 c.rgb_to_prov = self._worker.rgb_to_prov
@@ -1805,6 +2001,7 @@ class WorldMapTab(QWidget):
                 c.state_owner = self._worker.state_owner
                 c.prov_to_state = self._worker.prov_to_state
                 c.state_names = self._worker.state_names
+                c.vp_data = self._worker.vp_data
             if "ocean" in fps:
                 c.ocean_fp = fps["ocean"]
                 c.ocean_texture = self._worker.ocean_texture

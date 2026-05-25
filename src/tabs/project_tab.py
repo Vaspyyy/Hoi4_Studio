@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QMessageBox,
-    QFileDialog,
     QComboBox,
 )
 
@@ -53,9 +53,8 @@ class ProjectTab(QWidget):
         )
         r2, self.user_mods, b2 = row(
             "User Mods",
-            # TODO: tooltip assumes English folder names. On older localized Windows
-            # the Documents folder path differs. Fine on Win10+ where Explorer uses
-            # shell display names but the on-disk path is still English.
+            # On Win10+ the Documents folder uses shell display names but the
+            # on-disk path is English, so this tooltip is correct for modern Windows.
             "Path to the Paradox user mods folder (Linux: ~/.local/share/Paradox Interactive/Hearts of Iron IV/mod, Windows: Documents\\Paradox Interactive\\Hearts of Iron IV\\mod)",
         )
         r3, self.mod_root, b3 = row("Mod Root", "Where your mod lives. The folder with common/, history/, etc.")
@@ -235,20 +234,16 @@ class ProjectTab(QWidget):
         self.apply_paths(create_if_missing=False)
 
     def nuke(self):
-        # TODO: replace file-dialog-as-confirmation with a proper "type DELETE
-        # to confirm" dialog (QInputDialog or custom dialog with a QLineEdit).
-        # Opening a QFileDialog.getSaveFileName and checking the filename for
-        # "DELETE" is a confusing UX pattern ; users expect a file dialog to
-        # save files, not confirm destructive actions.
         if not self.mw.paths:
             QMessageBox.critical(self, "Error", "Load a mod first. Point me at the paths above.")
             return
-        text, ok = QFileDialog.getSaveFileName(
-            self, "Type DELETE as filename and press Save", "", ""
+        confirm, ok = QInputDialog.getText(
+            self,
+            "Confirm Delete",
+            'Type DELETE (all caps) to permanently erase this mod:',
+            QLineEdit.EchoMode.Normal,
         )
-        if not ok:
-            return
-        if Path(text).name.strip().upper() != "DELETE":
+        if not ok or confirm.strip() != "DELETE":
             QMessageBox.warning(self, "Cancelled", "Type DELETE to confirm. Nothing was touched.")
             return
         try:

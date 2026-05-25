@@ -10,19 +10,36 @@ from typing import Dict, List, Any, Optional
 from .parser import extract_braced_block
 
 
-def write_ideas_file(mod_root: Path, tag: str, ideas_data: List[Dict[str, Any]]):
+def write_ideas_file(mod_root: Path, tag: str, ideas_data: List[Dict[str, Any]]) -> None:
     ideas_dir = mod_root / "common" / "national_ideas"
     ideas_dir.mkdir(parents=True, exist_ok=True)
     ideas_file = ideas_dir / f"{tag.lower()}_ideas.txt"
+
+    from .localisation import append_localisation
+
+    loc_entries: dict[str, str] = {}
+    loc_path = mod_root / f"localisation/english/zzz_{tag.lower()}_ideas_l_english.yml"
 
     with open(ideas_file, "w", encoding="utf-8") as f:
         f.write("country_ideas = {\n")
         f.write(f"\tname = {tag}_ideas\n")
         for idea in ideas_data:
             f.write(f"\t{idea['id']} = {{\n")
-            if "icon" in idea:
-                f.write(f"\t\ticon = {idea['icon']}\n")
-            if "modifier" in idea:
+            if idea.get("picture"):
+                f.write(f'\t\tpicture = {idea["picture"]}\n')
+            if idea.get("desc"):
+                desc_key = f"{idea['id']}_desc"
+                f.write(f'\t\tdesc = "{desc_key}"\n')
+                loc_entries[desc_key] = idea["desc"]
+            if "removal_cost" in idea:
+                f.write(f"\t\tremoval_cost = {idea['removal_cost']}\n")
+            if idea.get("allowed"):
+                f.write("\t\tallowed = {\n")
+                for line in idea["allowed"].strip().splitlines():
+                    if line.strip():
+                        f.write(f"\t\t\t{line.strip()}\n")
+                f.write("\t\t}\n")
+            if idea.get("modifier"):
                 f.write("\t\tmodifier = {\n")
                 for mod_key, mod_value in idea["modifier"].items():
                     if isinstance(mod_value, bool):
@@ -34,6 +51,34 @@ def write_ideas_file(mod_root: Path, tag: str, ideas_data: List[Dict[str, Any]])
                 f.write("\t\t}\n")
             f.write("\t}\n\n")
         f.write("}\n")
+
+    if loc_entries:
+        append_localisation(loc_path, loc_entries)
+
+
+def write_idea_assignments(
+    mod_root: Path, tag: str, assigned_ids: List[str],
+    hoi4_install: Optional[Path] = None,
+) -> None:
+    history_file = _find_history_file(mod_root, tag, hoi4_install)
+    if not history_file:
+        hist_dir = mod_root / "history" / "countries"
+        hist_dir.mkdir(parents=True, exist_ok=True)
+        history_file = hist_dir / f"{tag} - country.txt"
+        history_file.write_text("", encoding="utf-8")
+
+    text = history_file.read_text(encoding="utf-8", errors="ignore")
+
+    # Remove existing add_ideas / remove_ideas blocks
+    text = re.sub(r"\n?(\s*)add_ideas\s*=\s*\{.*?\n\1\}", "", text, flags=re.DOTALL)
+    text = re.sub(r"\n?(\s*)remove_ideas\s*=\s*\{.*?\n\1\}", "", text, flags=re.DOTALL)
+    text = re.sub(r"\n?\s*remove_ideas\s*=\s*\w+", "", text)
+
+    if assigned_ids:
+        idea_list = " ".join(assigned_ids)
+        text = text.rstrip() + f"\n\nadd_ideas = {{\n\t{idea_list}\n}}\n"
+
+    history_file.write_text(text, encoding="utf-8")
 
 
 def write_dynamic_ideas_file(mod_root: Path, tag: str, dynamic_ideas_data: List[Dict[str, Any]]):
@@ -59,13 +104,7 @@ def write_dynamic_ideas_file(mod_root: Path, tag: str, dynamic_ideas_data: List[
             f.write("\t\tavailable = {\n")
             if "available" in idea:
                 for avail_key, avail_value in idea["available"].items():
-                    val = (
-                        "yes"
-                        if avail_value is True
-                        else "no"
-                        if avail_value is False
-                        else avail_value
-                    )
+                    val = "yes" if avail_value is True else "no" if avail_value is False else avail_value
                     if isinstance(avail_value, (int, float)) and not isinstance(avail_value, bool):
                         val = str(avail_value)
                     elif not isinstance(avail_value, bool):
@@ -87,10 +126,10 @@ def write_dynamic_ideas_file(mod_root: Path, tag: str, dynamic_ideas_data: List[
 
 
 def _parse_kv_properties(text: str) -> Dict[str, Any]:
-    props = {}
+    props: Dict[str, Any] = {}
     for key, value in re.findall(r"^\s*([a-zA-Z0-9_]+)\s*=\s*([^\n\r]+)", text, re.MULTILINE):
         value = value.strip().strip('"')
-        if value.lower() in ["yes", "no"]:
+        if value.lower() in ("yes", "no"):
             props[key.strip()] = value.lower() == "yes"
         elif "." in value or "inf" in value.lower() or "-inf" in value.lower():
             try:
@@ -119,7 +158,7 @@ def _extract_braced_block_content(text: str, keyword: str) -> str:
 
 
 def _find_toplevel_blocks(text: str) -> list[tuple[str, str]]:
-    blocks = []
+    blocks: list[tuple[str, str]] = []
     pos = 0
     while pos < len(text):
         m = re.search(r"\b([a-zA-Z0-9_]+)\s*=\s*\{", text[pos:])
@@ -140,7 +179,20 @@ def _parse_idea_body(idea_id: str, idea_body: str) -> Dict[str, Any]:
     idea_obj: Dict[str, Any] = {"id": idea_id.strip()}
     pic = re.search(r"picture\s*=\s*([^\n\r]+)", idea_body)
     if pic:
-        idea_obj["icon"] = pic.group(1).strip()
+        idea_obj["picture"] = pic.group(1).strip()
+    # also check old "icon" key for backwards compat
+    icon = re.search(r"icon\s*=\s*([^\n\r]+)", idea_body)
+    if icon and "picture" not in idea_obj:
+        idea_obj["picture"] = icon.group(1).strip()
+    desc = re.search(r'desc\s*=\s*"([^"]*)"', idea_body)
+    if desc:
+        idea_obj["desc"] = desc.group(1).strip()
+    removal = re.search(r"removal_cost\s*=\s*(-?\d+)", idea_body)
+    if removal:
+        idea_obj["removal_cost"] = int(removal.group(1))
+    allowed_block = _extract_braced_block_content(idea_body, "allowed")
+    if allowed_block:
+        idea_obj["allowed"] = allowed_block.strip()
     modifier_body = _extract_braced_block_content(idea_body, "modifier")
     if modifier_body:
         idea_obj["modifier"] = _parse_kv_properties(modifier_body)
@@ -200,31 +252,88 @@ def read_assigned_ideas(
     return [idea for idea in dict.fromkeys(assigned) if idea not in removed]
 
 
-def _read_vanilla_country_ideas(hoi4_install: Path, tag: str) -> List[Dict[str, Any]]:
-    ideas_dir = hoi4_install / "common" / "ideas"
-    if not ideas_dir.is_dir():
+def read_all_ideas(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None,
+    include_common_ideas: bool = True,
+) -> List[Dict[str, Any]]:
+    """Return a flat list of all ideas with a boolean 'assigned' flag."""
+    assigned_ids = set(read_assigned_ideas(mod_root, tag, hoi4_install))
+
+    # Read mod idea definitions
+    result: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    mod_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_ideas.txt"
+    has_studio_file = mod_file.exists()
+
+    if has_studio_file:
+        content = mod_file.read_text(encoding="utf-8", errors="ignore")
+        container = _extract_braced_block_content(content, "country_ideas")
+        for idea_id, idea_body in _find_toplevel_blocks(container):
+            idea_obj = _parse_idea_body(idea_id, idea_body)
+            idea_obj["assigned"] = idea_id in assigned_ids
+            seen_ids.add(idea_id)
+            result.append(idea_obj)
+
+    # Also read dynamic ideas
+    dynamic_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_dynamic_ideas.txt"
+    if dynamic_file.exists():
+        content = dynamic_file.read_text(encoding="utf-8", errors="ignore")
+        container = _extract_braced_block_content(content, "dynamic_country_ideas")
+        for idea_id, idea_body in _find_toplevel_blocks(container):
+            idea_obj = _parse_idea_body(idea_id, idea_body)
+            idea_obj["assigned"] = idea_id in assigned_ids
+            idea_obj["dynamic"] = True
+            seen_ids.add(idea_id)
+            result.append(idea_obj)
+
+    # Read from common/ideas/ — skip mod dir when studio file exists (it's authoritative);
+    # still scan vanilla for common ideas if checkbox is checked.
+    for base in [mod_root, hoi4_install]:
+        if base is None:
+            continue
+        if base == hoi4_install and not include_common_ideas:
+            continue
+        if base == mod_root and has_studio_file:
+            continue
+        ideas_dir = base / "common" / "ideas"
+        if not ideas_dir.is_dir():
+            continue
+        for ideas_file in ideas_dir.glob("*.txt"):
+            try:
+                content = ideas_file.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for idea_id, idea_body in _find_tagged_ideas(content, tag):
+                if idea_id not in seen_ids:
+                    idea_obj = _parse_idea_body(idea_id, idea_body)
+                    idea_obj["assigned"] = idea_id in assigned_ids
+                    seen_ids.add(idea_id)
+                    result.append(idea_obj)
+
+    # Add any assigned ideas not yet in the list
+    for idea_id in assigned_ids - seen_ids:
+        result.append({"id": idea_id, "assigned": True})
+
+    return result
+
+
+def _find_tagged_ideas(content: str, tag: str) -> list[tuple[str, str]]:
+    """Return (id, body) for ideas matching a country tag or generic/shared."""
+    outer = _extract_braced_block_content(content, "ideas")
+    if not outer:
+        return []
+    country_block = _extract_braced_block_content(outer, "country")
+    if not country_block:
         return []
 
-    results: List[Dict[str, Any]] = []
     tag_pat = re.compile(rf"original_tag\s*=\s*{re.escape(tag)}\b", re.IGNORECASE)
+    results: list[tuple[str, str]] = []
 
-    for ideas_file in ideas_dir.glob("*.txt"):
-        try:
-            content = ideas_file.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-
-        outer = _extract_braced_block_content(content, "ideas")
-        if not outer:
-            continue
-        country_block = _extract_braced_block_content(outer, "country")
-        if not country_block:
-            continue
-
-        for idea_id, idea_body in _find_toplevel_blocks(country_block):
-            allowed_block = _extract_braced_block_content(idea_body, "allowed")
-            if allowed_block and tag_pat.search(allowed_block):
-                results.append(_parse_idea_body(idea_id, idea_body))
+    for idea_id, idea_body in _find_toplevel_blocks(country_block):
+        allowed = _extract_braced_block_content(idea_body, "allowed")
+        if allowed and tag_pat.search(allowed):
+            results.append((idea_id, idea_body))
 
     return results
 
@@ -232,33 +341,8 @@ def _read_vanilla_country_ideas(hoi4_install: Path, tag: str) -> List[Dict[str, 
 def read_ideas_file(
     mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
 ) -> Dict[str, Any]:
-    ideas_data: Dict[str, Any] = {"static": [], "dynamic": []}
-
-    mod_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_ideas.txt"
-    if mod_file.exists():
-        content = mod_file.read_text(encoding="utf-8", errors="ignore")
-        container = _extract_braced_block_content(content, "country_ideas")
-        for idea_id, idea_body in _find_toplevel_blocks(container):
-            ideas_data["static"].append(_parse_idea_body(idea_id, idea_body))
-
-    dynamic_file = mod_root / "common" / "national_ideas" / f"{tag.lower()}_dynamic_ideas.txt"
-    if dynamic_file.exists():
-        content = dynamic_file.read_text(encoding="utf-8", errors="ignore")
-        container = _extract_braced_block_content(content, "dynamic_country_ideas")
-        for idea_id, idea_body in _find_toplevel_blocks(container):
-            idea_obj: Dict[str, Any] = {"id": idea_id.strip()}
-            potential_body = _extract_braced_block_content(idea_body, "potential")
-            if potential_body:
-                idea_obj["potential"] = _parse_kv_properties(potential_body)
-            available_body = _extract_braced_block_content(idea_body, "available")
-            if available_body:
-                idea_obj["available"] = _parse_kv_properties(available_body)
-            modifier_body = _extract_braced_block_content(idea_body, "modifier")
-            if modifier_body:
-                idea_obj["modifier"] = _parse_kv_properties(modifier_body)
-            ideas_data["dynamic"].append(idea_obj)
-
-    if not ideas_data["static"] and hoi4_install:
-        ideas_data["static"] = _read_vanilla_country_ideas(hoi4_install, tag)
-
-    return ideas_data
+    """Backwards-compat wrapper: returns {'static': [...], 'dynamic': [...]}."""
+    all_ideas = read_all_ideas(mod_root, tag, hoi4_install)
+    static = [i for i in all_ideas if not i.get("dynamic")]
+    dynamic = [i for i in all_ideas if i.get("dynamic")]
+    return {"static": static, "dynamic": dynamic}

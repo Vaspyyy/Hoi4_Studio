@@ -134,6 +134,22 @@ IDEOLOGY_COLORS = {
 }
 
 
+def get_ideology_color(ideology: str, parsed: dict | None = None) -> str:
+    """Return hex color for an ideology, preferring parsed data over defaults."""
+    if parsed and ideology in parsed:
+        r, g, b = parsed[ideology].color
+        return f"#{r:02x}{g:02x}{b:02x}"
+    return IDEOLOGY_COLORS.get(ideology, "#b8963e")
+
+
+def get_ideology_rgb(ideology: str, parsed: dict | None = None) -> tuple[int, int, int]:
+    if parsed and ideology in parsed:
+        return parsed[ideology].color
+    hex_color = IDEOLOGY_COLORS.get(ideology, "#b8963e")
+    h = hex_color.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
 class IdeologySlider(QWidget):
     value_changed = Signal(str, int)
 

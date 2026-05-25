@@ -878,13 +878,13 @@ def export_buildings_txt(
     path: str | Path,
     coastal: set[int] | None = None,
 ) -> None:
-    """Write buildings.txt with infrastructure + factories + naval bases.
+    """Write buildings.txt with factories + naval bases.
 
     Vanilla format (verified against HOI4 v1.18):
-      province_id;type;x;z;y;rotation;state_id
-    where z is altitude (~10), rotation is building orientation.
+      state_id;type;x;z;y;rotation;province_id
+    where z is altitude (~10), rotation is building orientation
+    and province_id is 0 for province-independent placement.
 
-    One infrastructure entry per land province.
     One arms_factory + industrial_complex at each territory capital.
     One naval_base_spawn + coastal_bunker on each coastal province.
     """
@@ -910,19 +910,20 @@ def export_buildings_txt(
     try:
         with open(path, "w", encoding="utf-8") as f:
             for d in province_data:
-                if d.get("province_type") == "ocean":
+                if d.get("province_type") in ("ocean", "lake"):
                     continue
                 pid = d["province_id"]
+                state_id = prov_terr.get(pid, 0)
+                if state_id < 1:
+                    continue
                 x = round(d["x"], 2)
                 y = round(d["y"], 2)
-                state_id = prov_terr.get(pid, 0)
-                f.write(f"{pid};infrastructure;{x};10.00;{y};0.00;{state_id}\n")
                 if pid in territory_capitals:
-                    f.write(f"{pid};arms_factory;{x};10.00;{y};0.00;{state_id}\n")
-                    f.write(f"{pid};industrial_complex;{x};10.00;{y};0.00;{state_id}\n")
+                    f.write(f"{state_id};arms_factory;{x};10.00;{y};0.00;{pid}\n")
+                    f.write(f"{state_id};industrial_complex;{x};10.00;{y};0.00;{pid}\n")
                 if pid in coastal:
-                    f.write(f"{pid};naval_base_spawn;{x};10.00;{y};0.00;{state_id}\n")
-                    f.write(f"{pid};coastal_bunker;{x};10.00;{y};0.00;{state_id}\n")
+                    f.write(f"{state_id};naval_base_spawn;{x};10.00;{y};0.00;{pid}\n")
+                    f.write(f"{state_id};coastal_bunker;{x};10.00;{y};0.00;{pid}\n")
     except OSError as e:
         logger.error("Failed to write buildings.txt %s: %s", path, e)
 

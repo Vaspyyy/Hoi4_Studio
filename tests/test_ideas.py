@@ -1,4 +1,4 @@
-from src.ideas import write_ideas_file, read_ideas_file, write_dynamic_ideas_file
+from src.ideas import write_ideas_file, read_ideas_file, read_all_ideas, write_dynamic_ideas_file
 
 
 class TestWriteIdeasFile:
@@ -6,7 +6,7 @@ class TestWriteIdeasFile:
         ideas_data = [
             {
                 "id": "test_idea",
-                "icon": "GFX_idea_generic",
+                "picture": "GFX_idea_generic",
                 "modifier": {"production_speed_factor": 0.10},
             }
         ]
@@ -30,7 +30,7 @@ class TestReadIdeasFile:
         ideas_data = [
             {
                 "id": "test_idea",
-                "icon": "GFX_idea_generic",
+                "picture": "GFX_idea_generic",
                 "modifier": {"production_speed_factor": 0.1},
             }
         ]

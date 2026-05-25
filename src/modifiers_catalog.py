@@ -150,6 +150,70 @@ MODIFIER_CATEGORIES: list[tuple[str, list[tuple[str, str, str]]]] = [
             ),
         ],
     ),
+    (
+        "Army \u2014 Combat",
+        [
+            ("Division Attack", "army_attack_factor", "0.10"),
+            ("Division Defence", "army_defence_factor", "0.10"),
+            ("Division Speed", "army_speed_factor", "0.10"),
+            ("Division Organization", "army_org_factor", "0.10"),
+            ("Recovery Rate", "army_morale_factor", "0.10"),
+            ("Reinforce Rate", "reinforce_rate_factor", "0.05"),
+            ("Planning Speed", "planning_speed_factor", "0.10"),
+            ("Max Planning", "max_planning_factor", "0.10"),
+            ("Entrenchment Speed", "dig_in_speed_factor", "0.10"),
+            ("Supply Consumption", "army_fuel_consumption_factor", "-0.10"),
+            ("Combat Width", "combat_width_factor", "-0.05"),
+            ("Reconnaissance", "recon_factor", "0.10"),
+            ("Initiative", "initiative_factor", "0.10"),
+            ("Soft Attack", "soft_attack_factor", "0.10"),
+            ("Hard Attack", "hard_attack_factor", "0.10"),
+        ],
+    ),
+    (
+        "Army \u2014 Training",
+        [
+            ("Division Training Time", "training_time_factor", "-0.10"),
+            ("Experience Gain (Army)", "army_experience_gain_factor", "0.10"),
+            ("Experience Gain (All)", "experience_gain_factor", "0.10"),
+            ("Minimum Training Level", "minimum_training_level", "0.10"),
+        ],
+    ),
+    (
+        "Navy \u2014 Combat",
+        [
+            ("Naval Speed", "navy_speed_factor", "0.10"),
+            ("Naval Strike", "navy_strike_attack_factor", "0.10"),
+            ("Naval Max Range", "navy_max_range_factor", "0.10"),
+            ("Naval Detection", "navy_detection_factor", "0.10"),
+            ("Submarine Detection", "navy_submarine_detection_factor", "0.10"),
+            ("Submarine Attack", "navy_submarine_attack_factor", "0.10"),
+            ("Convoy Raiding Efficiency", "convoy_raiding_efficiency_factor", "0.10"),
+            ("Mine Sweeping", "navy_mine_sweeping_factor", "0.10"),
+        ],
+    ),
+    (
+        "Air \u2014 Combat",
+        [
+            ("Air Agility", "air_agility_factor", "0.10"),
+            ("Air Range", "air_range_factor", "0.10"),
+            ("Air Attack", "air_attack_factor", "0.10"),
+            ("Air Defence", "air_defence_factor", "0.10"),
+            ("Air Superiority", "air_superiority_factor", "0.10"),
+            ("Air Mission Efficiency", "air_mission_efficiency_factor", "0.10"),
+            ("Ace Generation Chance", "ace_generation_chance_factor", "0.10"),
+            ("Air Accident Chance", "air_accident_factor", "-0.10"),
+        ],
+    ),
+    (
+        "Production",
+        [
+            ("Production Efficiency Cap", "production_factory_max_efficiency_factor", "0.10"),
+            ("Production Efficiency Growth", "production_factory_efficiency_gain_factor", "0.10"),
+            ("Production Efficiency Retention", "production_factory_efficiency_retention_factor", "0.10"),
+            ("Dockyard Output", "naval_dockyard_output_factor", "0.10"),
+        ],
+    ),
 ]
 
 

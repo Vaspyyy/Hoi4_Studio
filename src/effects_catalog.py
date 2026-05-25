@@ -3,10 +3,40 @@ HOI4 Modding Studio - Event Effects Catalog
 
 Categorized list of event effects for the event builder and focus tree editor.
 Format: (display_name, effect_code) ; see EFFECT_CATEGORIES below.
+
+Ideology effects are generated dynamically via refresh_effect_catalog().
 """
 
 from __future__ import annotations
 
+
+def _build_ideology_effects(ideologies: dict | None) -> list[tuple[str, str]]:
+    if ideologies is None:
+        return _HARDCODED_IDEOLOGY_EFFECTS
+    result: list[tuple[str, str]] = []
+    for key in sorted(ideologies):
+        result.append((
+            f"Add Popularity ({key})",
+            f"add_popularity = {{ ideology = {key} popularity = 0.1 }}",
+        ))
+    for key in sorted(ideologies):
+        result.append((
+            f"Set Ruling Party ({key})",
+            f"set_politics = {{ ruling_party = {key} }}",
+        ))
+    return result
+
+
+_HARDCODED_IDEOLOGY_EFFECTS: list[tuple[str, str]] = [
+    ("Add Popularity (democratic)", "add_popularity = { ideology = democratic popularity = 0.1 }"),
+    ("Add Popularity (fascism)", "add_popularity = { ideology = fascism popularity = 0.1 }"),
+    ("Add Popularity (communism)", "add_popularity = { ideology = communism popularity = 0.1 }"),
+    ("Add Popularity (neutrality)", "add_popularity = { ideology = neutrality popularity = 0.1 }"),
+    ("Set Ruling Party (democratic)", "set_politics = { ruling_party = democratic }"),
+    ("Set Ruling Party (fascism)", "set_politics = { ruling_party = fascism }"),
+    ("Set Ruling Party (communism)", "set_politics = { ruling_party = communism }"),
+    ("Set Ruling Party (neutrality)", "set_politics = { ruling_party = neutrality }"),
+]
 
 EFFECT_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
     (
@@ -23,37 +53,7 @@ EFFECT_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
     ),
     (
         "Ideology",
-        [
-            (
-                "Add Popularity (democratic)",
-                "add_popularity = { ideology = democratic popularity = 0.1 }",
-            ),
-            (
-                "Add Popularity (fascism)",
-                "add_popularity = { ideology = fascism popularity = 0.1 }",
-            ),
-            (
-                "Add Popularity (communism)",
-                "add_popularity = { ideology = communism popularity = 0.1 }",
-            ),
-            (
-                "Add Popularity (neutrality)",
-                "add_popularity = { ideology = neutrality popularity = 0.1 }",
-            ),
-            (
-                "Set Ruling Party (democratic)",
-                "set_politics = { ruling_party = democratic }",
-            ),
-            ("Set Ruling Party (fascism)", "set_politics = { ruling_party = fascism }"),
-            (
-                "Set Ruling Party (communism)",
-                "set_politics = { ruling_party = communism }",
-            ),
-            (
-                "Set Ruling Party (neutrality)",
-                "set_politics = { ruling_party = neutrality }",
-            ),
-        ],
+        _HARDCODED_IDEOLOGY_EFFECTS,
     ),
     (
         "Economy",
@@ -183,7 +183,24 @@ EFFECT_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
     ),
 ]
 
-
 ALL_EFFECTS: list[tuple[str, str]] = []
-for _cat, _items in EFFECT_CATEGORIES:
-    ALL_EFFECTS.extend(_items)
+
+
+def refresh_effect_catalog(ideologies: dict | None = None) -> None:
+    """Rebuild ALL_EFFECTS with dynamic ideology entries.
+
+    Call after loading/changing ideology definitions.  If *ideologies* is
+    None the 4 vanilla entries are used as a fallback.
+    """
+    ideology_effects = _build_ideology_effects(ideologies)
+    ALL_EFFECTS.clear()
+
+    for _cat, _items in EFFECT_CATEGORIES:
+        if _cat == "Ideology":
+            ALL_EFFECTS.extend(ideology_effects)
+        else:
+            ALL_EFFECTS.extend(_items)
+
+
+# populate with vanilla fallback on import
+refresh_effect_catalog()

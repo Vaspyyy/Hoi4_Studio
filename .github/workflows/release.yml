@@ -21,10 +21,8 @@ jobs:
       - name: Build executable
         run: pyinstaller hoi4_studio.spec
 
-      # TODO: use -Path "dist/HOI4 Modding Studio" without /* so the zip contains
-      # a parent folder rather than flattening files to root on extraction.
       - name: Package artifact
-        run: Compress-Archive -Path "dist/HOI4 Modding Studio/*" -DestinationPath "HOI4-Modding-Studio-Windows.zip"
+        run: Compress-Archive -Path "dist/HOI4 Modding Studio" -DestinationPath "HOI4-Modding-Studio-Windows.zip"
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2

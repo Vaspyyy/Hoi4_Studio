@@ -7,13 +7,11 @@ doesn't crash on startup when vanilla country tags are replaced.
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -38,6 +36,7 @@ class BookmarkTab(QWidget):
     def __init__(self, mw: "MainWindow"):
         super().__init__()
         self.mw = mw
+        self._country_data: list = []
 
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
@@ -146,7 +145,9 @@ class BookmarkTab(QWidget):
     # -----------------------------------------------------------------
 
     def _pick_picture(self) -> None:
-        f, _ = QFileDialog.getOpenFileName(self, "Select picture", "", "Images (*.png *.jpg *.jpeg *.dds *.tga)")
+        f, _ = QFileDialog.getOpenFileName(
+            self, "Select picture", "", "Images (*.png *.jpg *.jpeg *.dds *.tga)"
+        )
         if f:
             self._picture_source = Path(f)
             self.bm_pic.setText(str(f))
@@ -179,7 +180,7 @@ class BookmarkTab(QWidget):
         """
         src = self._picture_source
         if not src or not src.is_file():
-            return self.bm_pic.text().strip()
+            return str(self.bm_pic.text().strip())
 
         gfx_name = f"GFX_{bm_key}"
         out_dir = mod / "gfx" / "interface"
@@ -188,7 +189,7 @@ class BookmarkTab(QWidget):
 
         try:
             with Image.open(src) as img:
-                rgba = img.convert("RGBA").resize((180, 104), Image.LANCZOS)
+                rgba = img.convert("RGBA").resize((180, 104), Image.LANCZOS)  # type: ignore[attr-defined]
 
             png_tmp = out_dir / f"{bm_key.lower()}_tmp.png"
             rgba.save(png_tmp, format="PNG")
@@ -201,20 +202,23 @@ class BookmarkTab(QWidget):
             gfx_dir = mod / "interface"
             gfx_dir.mkdir(parents=True, exist_ok=True)
             gfx_path = gfx_dir / f"{bm_key.lower()}.gfx"
-            gfx_path.write_text(f"""spriteTypes = {{
+            gfx_path.write_text(
+                f"""spriteTypes = {{
 \tspriteType = {{
 \t\tname = "{gfx_name}"
 \t\ttexturefile = "gfx/interface/{bm_key.lower()}.dds"
 \t}}
 }}
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
             self.mw.log_panel.log(f"Imported bookmark picture: {dds_path} (180x104 DDS)", "success")
             self._picture_source = None
             return gfx_name
         except Exception as e:
             self.mw.log_panel.log(f"Picture import failed: {e}", "error")
-            return self.bm_pic.text().strip()
+            return str(self.bm_pic.text().strip())
 
     def _read_country_tags(self) -> list[str]:
         mod = self._mod_root()
@@ -285,7 +289,7 @@ class BookmarkTab(QWidget):
 
         self.default_country.clear()
 
-        self._country_data: list[tuple[QCheckBox, str, QLineEdit, QLineEdit, str]] = []
+        self._country_data = []
 
         for tag in tags:
             ideology = self._read_country_ideology(tag)
@@ -361,7 +365,7 @@ class BookmarkTab(QWidget):
             desc_key = desc_m.group(1).replace("_BOOKMARK_DESC", "").replace("_", " ").title()
             self.bm_desc.setText(desc_key)
 
-        date_m = re.search(r'date\s*=\s*(\S+)', text)
+        date_m = re.search(r"date\s*=\s*(\S+)", text)
         if date_m:
             self.start_date.setText(date_m.group(1))
 
@@ -381,13 +385,13 @@ class BookmarkTab(QWidget):
             tag = m.group(1)
             block = m.group(0)
             hist_m = re.search(r'history\s*=\s*"([^"]*)"', block)
-            ideo_m = re.search(r'ideology\s*=\s*(\S+)', block)
+            ideo_m = re.search(r"ideology\s*=\s*(\S+)", block)
             existing[tag] = (
                 hist_m.group(1) if hist_m else f"{tag}_BOOKMARK_DESC",
                 ideo_m.group(1) if ideo_m else "neutrality",
             )
 
-        if not hasattr(self, "_country_data") or not self._country_data:
+        if not self._country_data:
             self.mw.log_panel.log("No countries loaded. Click Refresh first.", "warning")
             return
 
@@ -405,15 +409,24 @@ class BookmarkTab(QWidget):
         self.mw.log_panel.log(f"Loaded {len(existing)} countries from existing bookmark.", "info")
 
     def _read_bookmark_localisation(self, mod: Path) -> dict[str, str]:
-        """Read bookmark descriptions from mod's bookmarks_l_english.yml."""
-        from ..localisation import parse_english_localisation
+        from ..localisation import YML_ENTRY_RE
 
         result: dict[str, str] = {}
         for fname in ["bookmarks_l_english.yml", "zzz_mod_localisation_l_english.yml"]:
             p = mod / "localisation" / "english" / fname
             if p.is_file():
-                result.update(parse_english_localisation(p.parent))
-                break  # one dir is enough
+                raw = p.read_bytes()
+                try:
+                    txt = raw.decode("utf-8-sig")
+                except Exception:
+                    txt = raw.decode("utf-8", errors="ignore")
+                for line in txt.splitlines():
+                    if not line or line.strip().startswith("#") or line.strip().startswith("l_"):
+                        continue
+                    m = YML_ENTRY_RE.match(line)
+                    if m:
+                        result[m.group(1)] = m.group(2).replace("\\n", "\n")
+                break
         return result
 
     def _generate(self) -> None:
@@ -467,8 +480,10 @@ class BookmarkTab(QWidget):
         # replace header fields (match vanilla quoting style)
         text = re.sub(r'name\s*=\s*"[^"]*"', f'name = "{bm_key}"', text, count=1)
         text = re.sub(r'desc\s*=\s*"[^"]*"', f'desc = "{bm_desc_key}"', text, count=1)
-        text = re.sub(r'date\s*=\s*\S+', f'date = {start}', text, count=1)
-        text = re.sub(r'default_country\s*=\s*"[^"]*"', f'default_country = "{default_tag}"', text, count=1)
+        text = re.sub(r"date\s*=\s*\S+", f"date = {start}", text, count=1)
+        text = re.sub(
+            r'default_country\s*=\s*"[^"]*"', f'default_country = "{default_tag}"', text, count=1
+        )
 
         # import picture (or keep vanilla reference)
         bm_pic = self._import_bookmark_picture(mod, self._sanitise_key(name))
@@ -479,12 +494,6 @@ class BookmarkTab(QWidget):
         selected_tags = {tag for tag, _, _, _ in selected}
         country_blocks: list[str] = []
 
-        # extract existing country blocks for unselected tags
-        existing_cb = re.findall(
-            r'\t\t"(\w{2,4})"=\{.*?\n\t\t\}',
-            text.replace("\t", "\\t"),
-            flags=re.DOTALL,
-        )
         # fallback: simple raw match
         for m in re.finditer(r'"(\w{2,4})"=\{.*?\n\t\t\}', text, flags=re.DOTALL):
             tag = m.group(1)
@@ -496,9 +505,9 @@ class BookmarkTab(QWidget):
             focus = self._read_focus_tree(tag)
             block = f'\t\t"{tag}"={{\n'
             block += f'\t\t\thistory = "{hkey}"\n'
-            block += f'\t\t\tideology = {ideology}\n'
+            block += f"\t\t\tideology = {ideology}\n"
             if focus:
-                block += f'\t\t\tfocuses = {{\n\t\t\t\t{focus}\n\t\t\t}}\n'
+                block += f"\t\t\tfocuses = {{\n\t\t\t\t{focus}\n\t\t\t}}\n"
             block += "\t\t}"
             country_blocks.append(block)
 
@@ -506,8 +515,8 @@ class BookmarkTab(QWidget):
 
         # strip all vanilla/mod country entries between "default = yes" and "effect"
         text = re.sub(
-            r'(default\s*=\s*yes\s*\n).*?(\n\t\teffect\s*=)',
-            rf'\1\n{country_section}\n\2',
+            r"(default\s*=\s*yes\s*\n).*?(\n\t\teffect\s*=)",
+            rf"\1\n{country_section}\n\2",
             text,
             flags=re.DOTALL,
         )
@@ -560,7 +569,9 @@ class BookmarkTab(QWidget):
         if hoi4:
             src = hoi4 / "common" / "defines" / "00_defines.lua"
         if not src or not src.is_file():
-            self.mw.log_panel.log("Vanilla 00_defines.lua not found ; skipping defines override.", "warning")
+            self.mw.log_panel.log(
+                "Vanilla 00_defines.lua not found ; skipping defines override.", "warning"
+            )
             return
 
         text = src.read_text(encoding="utf-8")

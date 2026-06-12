@@ -22,6 +22,7 @@ class GenericCommand(QUndoCommand):
     See tests for edge-case coverage: double-undo, empty-list remove, and dict
     key-not-found.
     """
+
     def __init__(
         self,
         text: str,

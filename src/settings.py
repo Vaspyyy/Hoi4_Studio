@@ -8,14 +8,16 @@ import json
 import logging
 import os
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields as dc_fields
 from pathlib import Path
 
 
 logger = logging.getLogger("hoi4_studio.settings")
 
 if sys.platform == "win32":
-    APP_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "hoi4-modding-studio"
+    APP_DIR = (
+        Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "hoi4-modding-studio"
+    )
 else:
     APP_DIR = Path.home() / ".config" / "hoi4-modding-studio"
 SETTINGS_FILE = APP_DIR / "settings.json"
@@ -54,8 +56,9 @@ def load_settings() -> AppSettings:
     try:
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         s = AppSettings()
+        known = {f.name for f in dc_fields(AppSettings)}
         for k, v in data.items():
-            if hasattr(s, k):
+            if k in known:
                 setattr(s, k, v)
         logger.info("Settings loaded from %s", SETTINGS_FILE)
         return s
@@ -81,6 +84,7 @@ def load_editor_state() -> dict:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        result: dict = json.loads(p.read_text(encoding="utf-8"))
+        return result
     except Exception:
         return {}

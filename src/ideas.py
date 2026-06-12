@@ -20,44 +20,65 @@ def write_ideas_file(mod_root: Path, tag: str, ideas_data: List[Dict[str, Any]])
     loc_entries: dict[str, str] = {}
     loc_path = mod_root / f"localisation/english/zzz_{tag.lower()}_ideas_l_english.yml"
 
-    with open(ideas_file, "w", encoding="utf-8") as f:
-        f.write("country_ideas = {\n")
-        f.write(f"\tname = {tag}_ideas\n")
-        for idea in ideas_data:
-            f.write(f"\t{idea['id']} = {{\n")
-            if idea.get("picture"):
-                f.write(f'\t\tpicture = {idea["picture"]}\n')
-            if idea.get("desc"):
-                desc_key = f"{idea['id']}_desc"
-                f.write(f'\t\tdesc = "{desc_key}"\n')
-                loc_entries[desc_key] = idea["desc"]
-            if "removal_cost" in idea:
-                f.write(f"\t\tremoval_cost = {idea['removal_cost']}\n")
-            if idea.get("allowed"):
-                f.write("\t\tallowed = {\n")
-                for line in idea["allowed"].strip().splitlines():
-                    if line.strip():
-                        f.write(f"\t\t\t{line.strip()}\n")
-                f.write("\t\t}\n")
-            if idea.get("modifier"):
-                f.write("\t\tmodifier = {\n")
-                for mod_key, mod_value in idea["modifier"].items():
-                    if isinstance(mod_value, bool):
-                        f.write(f"\t\t\t{mod_key} = {'yes' if mod_value else 'no'}\n")
-                    elif isinstance(mod_value, (int, float)):
-                        f.write(f"\t\t\t{mod_key} = {mod_value}\n")
-                    else:
-                        f.write(f'\t\t\t{mod_key} = "{mod_value}"\n')
-                f.write("\t\t}\n")
-            f.write("\t}\n\n")
-        f.write("}\n")
+    parts: list[str] = []
+    parts.append("country_ideas = {\n")
+    parts.append(f"\tname = {tag}_ideas\n")
+    for idea in ideas_data:
+        parts.append(f"\t{idea['id']} = {{\n")
+        if idea.get("picture"):
+            parts.append(f"\t\tpicture = {idea['picture']}\n")
+        if idea.get("desc"):
+            desc_key = f"{idea['id']}_desc"
+            parts.append(f'\t\tdesc = "{desc_key}"\n')
+            loc_entries[desc_key] = idea["desc"]
+        if "removal_cost" in idea:
+            parts.append(f"\t\tremoval_cost = {idea['removal_cost']}\n")
+        if idea.get("allowed"):
+            parts.append("\t\tallowed = {\n")
+            for line in idea["allowed"].strip().splitlines():
+                if line.strip():
+                    parts.append(f"\t\t\t{line.strip()}\n")
+            parts.append("\t\t}\n")
+        if idea.get("modifier"):
+            parts.append("\t\tmodifier = {\n")
+            for mod_key, mod_value in idea["modifier"].items():
+                if isinstance(mod_value, bool):
+                    parts.append(f"\t\t\t{mod_key} = {'yes' if mod_value else 'no'}\n")
+                elif isinstance(mod_value, (int, float)):
+                    parts.append(f"\t\t\t{mod_key} = {mod_value}\n")
+                else:
+                    parts.append(f'\t\t\t{mod_key} = "{mod_value}"\n')
+            parts.append("\t\t}\n")
+        parts.append("\t}\n\n")
+    parts.append("}\n")
+    ideas_file.write_text("".join(parts), encoding="utf-8")
 
     if loc_entries:
         append_localisation(loc_path, loc_entries)
 
 
+def _remove_block(text: str, key: str) -> str:
+    match = re.search(rf"{key}\s*=\s*\{{", text)
+    if not match:
+        return text
+    start = match.start()
+    brace_start = match.end() - 1
+    try:
+        _, end_idx = extract_braced_block(text, brace_start + 1)
+    except ValueError:
+        return text
+    line_start = text.rfind("\n", 0, start)
+    if line_start == -1:
+        line_start = 0
+    else:
+        line_start += 1
+    return text[:line_start] + text[end_idx:]
+
+
 def write_idea_assignments(
-    mod_root: Path, tag: str, assigned_ids: List[str],
+    mod_root: Path,
+    tag: str,
+    assigned_ids: List[str],
     hoi4_install: Optional[Path] = None,
 ) -> None:
     history_file = _find_history_file(mod_root, tag, hoi4_install)
@@ -69,9 +90,8 @@ def write_idea_assignments(
 
     text = history_file.read_text(encoding="utf-8", errors="ignore")
 
-    # Remove existing add_ideas / remove_ideas blocks
-    text = re.sub(r"\n?(\s*)add_ideas\s*=\s*\{.*?\n\1\}", "", text, flags=re.DOTALL)
-    text = re.sub(r"\n?(\s*)remove_ideas\s*=\s*\{.*?\n\1\}", "", text, flags=re.DOTALL)
+    text = _remove_block(text, "add_ideas")
+    text = _remove_block(text, "remove_ideas")
     text = re.sub(r"\n?\s*remove_ideas\s*=\s*\w+", "", text)
 
     if assigned_ids:
@@ -86,43 +106,46 @@ def write_dynamic_ideas_file(mod_root: Path, tag: str, dynamic_ideas_data: List[
     ideas_dir.mkdir(parents=True, exist_ok=True)
     dynamic_ideas_file = ideas_dir / f"{tag.lower()}_dynamic_ideas.txt"
 
-    with open(dynamic_ideas_file, "w", encoding="utf-8") as f:
-        f.write("dynamic_country_ideas = {\n")
-        f.write(f"\tname = {tag}_dynamic_ideas\n")
-        for idea in dynamic_ideas_data:
-            f.write(f"\t{idea['id']} = {{\n")
-            f.write("\t\tpotential = {\n")
-            if "potential" in idea:
-                for pot_key, pot_value in idea["potential"].items():
-                    val = "yes" if pot_value is True else "no" if pot_value is False else pot_value
-                    if isinstance(pot_value, (int, float)) and not isinstance(pot_value, bool):
-                        val = str(pot_value)
-                    elif not isinstance(pot_value, bool):
-                        val = f'"{pot_value}"'
-                    f.write(f"\t\t\t{pot_key} = {val}\n")
-            f.write("\t\t}\n")
-            f.write("\t\tavailable = {\n")
-            if "available" in idea:
-                for avail_key, avail_value in idea["available"].items():
-                    val = "yes" if avail_value is True else "no" if avail_value is False else avail_value
-                    if isinstance(avail_value, (int, float)) and not isinstance(avail_value, bool):
-                        val = str(avail_value)
-                    elif not isinstance(avail_value, bool):
-                        val = f'"{avail_value}"'
-                    f.write(f"\t\t\t{avail_key} = {val}\n")
-            f.write("\t\t}\n")
-            if "modifier" in idea:
-                f.write("\t\tmodifier = {\n")
-                for mod_key, mod_value in idea["modifier"].items():
-                    if isinstance(mod_value, bool):
-                        f.write(f"\t\t\t{mod_key} = {'yes' if mod_value else 'no'}\n")
-                    elif isinstance(mod_value, (int, float)):
-                        f.write(f"\t\t\t{mod_key} = {mod_value}\n")
-                    else:
-                        f.write(f'\t\t\t{mod_key} = "{mod_value}"\n')
-                f.write("\t\t}\n")
-            f.write("\t}\n\n")
-        f.write("}\n")
+    parts: list[str] = []
+    parts.append("dynamic_country_ideas = {\n")
+    parts.append(f"\tname = {tag}_dynamic_ideas\n")
+    for idea in dynamic_ideas_data:
+        parts.append(f"\t{idea['id']} = {{\n")
+        parts.append("\t\tpotential = {\n")
+        if "potential" in idea:
+            for pot_key, pot_value in idea["potential"].items():
+                if isinstance(pot_value, bool):
+                    val = "yes" if pot_value else "no"
+                elif isinstance(pot_value, (int, float)):
+                    val = str(pot_value)
+                else:
+                    val = f'"{pot_value}"'
+                parts.append(f"\t\t\t{pot_key} = {val}\n")
+        parts.append("\t\t}\n")
+        parts.append("\t\tavailable = {\n")
+        if "available" in idea:
+            for avail_key, avail_value in idea["available"].items():
+                if isinstance(avail_value, bool):
+                    val = "yes" if avail_value else "no"
+                elif isinstance(avail_value, (int, float)):
+                    val = str(avail_value)
+                else:
+                    val = f'"{avail_value}"'
+                parts.append(f"\t\t\t{avail_key} = {val}\n")
+        parts.append("\t\t}\n")
+        if "modifier" in idea:
+            parts.append("\t\tmodifier = {\n")
+            for mod_key, mod_value in idea["modifier"].items():
+                if isinstance(mod_value, bool):
+                    parts.append(f"\t\t\t{mod_key} = {'yes' if mod_value else 'no'}\n")
+                elif isinstance(mod_value, (int, float)):
+                    parts.append(f"\t\t\t{mod_key} = {mod_value}\n")
+                else:
+                    parts.append(f'\t\t\t{mod_key} = "{mod_value}"\n')
+            parts.append("\t\t}\n")
+        parts.append("\t}\n\n")
+    parts.append("}\n")
+    dynamic_ideas_file.write_text("".join(parts), encoding="utf-8")
 
 
 def _parse_kv_properties(text: str) -> Dict[str, Any]:
@@ -208,16 +231,14 @@ def _find_history_file(
         d = base / "history" / "countries"
         if not d.is_dir():
             continue
-        for cand in d.glob(f"{tag} - *.txt"):
+        for cand in sorted(d.glob(f"{tag} - *.txt")):
             return cand
-        for cand in d.glob(f"{tag}*.txt"):
+        for cand in sorted(d.glob(f"{tag}*.txt")):
             return cand
     return None
 
 
-def read_assigned_ideas(
-    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
-) -> List[str]:
+def read_assigned_ideas(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> List[str]:
     history_file = _find_history_file(mod_root, tag, hoi4_install)
     if history_file is None:
         return []
@@ -253,7 +274,9 @@ def read_assigned_ideas(
 
 
 def read_all_ideas(
-    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None,
+    mod_root: Path,
+    tag: str,
+    hoi4_install: Optional[Path] = None,
     include_common_ideas: bool = True,
 ) -> List[Dict[str, Any]]:
     """Return a flat list of all ideas with a boolean 'assigned' flag."""

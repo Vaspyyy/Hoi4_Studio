@@ -52,6 +52,8 @@ def generate_event_file(mod_root: Path, namespace: str, events: list[dict]) -> N
             out += " }\n"
         else:
             for idx, opt in enumerate(options):
+                if idx >= 26:
+                    break
                 suffix = chr(ord("a") + idx)
                 out += "\n option = {\n"
                 out += f"  name = {ev['id']}.{suffix}\n"
@@ -87,6 +89,8 @@ def generate_event_localisation(mod_root: Path, namespace: str, events: list[dic
             entries[f"{ev['id']}.a"] = ev.get("option_text", "OK")
         else:
             for idx, opt in enumerate(options):
+                if idx >= 26:
+                    break
                 suffix = chr(ord("a") + idx)
                 entries[f"{ev['id']}.{suffix}"] = opt.get("name", f"Option {idx + 1}")
 

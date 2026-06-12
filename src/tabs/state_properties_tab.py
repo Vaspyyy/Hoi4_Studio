@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtGui import QDoubleValidator, QIntValidator, QRegularExpressionValidator, QValidator
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtGui import QDoubleValidator, QIntValidator, QValidator
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
 )
 
+from ..parser import extract_braced_block
 from ..theme import AnimatedButton, create_card_widget, create_section_title
 from ..states import ensure_state_in_mod, read_state_properties, write_state_properties
 
@@ -58,6 +60,99 @@ class VictoryPointsValidator(QValidator):
             if not (c.isdigit() or c == " "):
                 return QValidator.State.Invalid, text, pos
         return QValidator.State.Acceptable, text, pos
+
+
+class _BulkDistributeWorker(QThread):
+    progress = Signal(int, int, str)
+    result = Signal(int, int)
+
+    def __init__(
+        self,
+        state_dir,
+        pop_per_prov: int,
+        categories: list[tuple[str, int]],
+        resource_names: list[str],
+    ):
+        super().__init__()
+        self.state_dir = state_dir
+        self.pop_per_prov = pop_per_prov
+        self.categories = categories
+        self.resource_names = resource_names
+
+    def run(self):
+        import numpy as np
+        import re
+
+        state_files = sorted(self.state_dir.glob("*.txt"))
+        total = len(state_files)
+        updated = 0
+
+        for idx, sf in enumerate(state_files):
+            self.progress.emit(idx, total, sf.name)
+            try:
+                text = sf.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+
+            prov_keyword = re.search(r"provinces\s*=\s*\{", text)
+            if not prov_keyword:
+                continue
+            try:
+                block_content, _ = extract_braced_block(text, prov_keyword.end())
+            except ValueError:
+                continue
+            prov_ids = re.findall(r"\d+", block_content)
+            n_provs = len(prov_ids)
+            if n_provs == 0:
+                continue
+
+            sid_match = re.search(r"\bid\s*=\s*(\d+)", text)
+            state_id = int(sid_match.group(1)) if sid_match else 0
+
+            population = n_provs * self.pop_per_prov
+
+            cat = "rural"
+            for cat_name, threshold in self.categories:
+                if n_provs >= threshold:
+                    cat = cat_name
+
+            infra = min(5, max(0, n_provs // 8))
+
+            rng = np.random.default_rng(state_id + 42)
+            resources: dict[str, int] = {}
+            for rn in self.resource_names:
+                if rng.random() < 0.04:
+                    resources[rn] = int(rng.integers(5, 21))
+                else:
+                    resources[rn] = 0
+
+            res_block = "resources={\n"
+            for rn in self.resource_names:
+                res_block += f"\t{rn}={resources[rn]}\n"
+            res_block += "}"
+
+            text = re.sub(r"resources\s*=\s*\{[^}]*\}", "", text, flags=re.DOTALL)
+            text = re.sub(
+                r"(state_category\s*=\s*\w+)",
+                rf"\1\n\t{res_block}",
+                text,
+            )
+
+            text = re.sub(r"manpower\s*=\s*\d+", f"manpower = {population}", text)
+            if "manpower" not in text:
+                text = re.sub(
+                    r"(state_category\s*=\s*\w+)",
+                    rf"\1\n\tmanpower = {population}",
+                    text,
+                )
+
+            text = re.sub(r"state_category\s*=\s*\w+", f"state_category = {cat}", text)
+            text = re.sub(r"(infrastructure\s*=\s*)\d+", rf"\g<1>{infra}", text)
+
+            sf.write_text(text, encoding="utf-8")
+            updated += 1
+
+        self.result.emit(updated, total)
 
 
 class StatePropertiesTab(QWidget):
@@ -263,24 +358,9 @@ class StatePropertiesTab(QWidget):
             self.mw.log_panel.log(str(e), "error")
 
     def _bulk_distribute(self):
-        """Set population and resources for every state file in the mod.
-
-        For each state in history/states/, counts the provinces listed
-        in the provinces block, then sets:
-          population = province_count × bulk_pop_input value
-          resources = random distribution (15% chance per type)
-          state_category = scaled by province count thresholds
-          infrastructure = province_count // 8 (capped at 5)
-
-        Uses a deterministic PRNG seeded from state ID so repeated
-        runs produce the same resource layout.
-        """
         if not self.mw.paths:
             self.bulk_status_label.setText("Load a mod first.")
             return
-
-        import numpy as np
-        import re
 
         state_dir = self.mw.paths.mod_root / "history" / "states"
         if not state_dir.is_dir():
@@ -293,86 +373,35 @@ class StatePropertiesTab(QWidget):
             return
 
         categories = [
-            ("wasteland", 1), ("small_island", 2), ("pastoral", 3),
-            ("rural", 5), ("town", 10), ("large_town", 20),
-            ("city", 40), ("large_city", 80), ("metropolis", 150),
+            ("wasteland", 1),
+            ("small_island", 2),
+            ("pastoral", 3),
+            ("rural", 5),
+            ("town", 10),
+            ("large_town", 20),
+            ("city", 40),
+            ("large_city", 80),
+            ("metropolis", 150),
             ("megalopolis", 300),
         ]
 
         resource_names = ["aluminium", "chromium", "coal", "oil", "rubber", "steel", "tungsten"]
 
-        state_files = sorted(state_dir.glob("*.txt"))
-        if not state_files:
-            self.bulk_status_label.setText("No state files found.")
-            return
+        self.bulk_pop_button.setEnabled(False)
+        self._bulk_worker = _BulkDistributeWorker(
+            state_dir, pop_per_prov, categories, resource_names
+        )
+        self._bulk_worker.progress.connect(self._on_bulk_progress)
+        self._bulk_worker.result.connect(self._on_bulk_finished)
+        self._bulk_worker.start()
 
-        updated = 0
-        for sf in state_files:
-            try:
-                text = sf.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                continue
+    def _on_bulk_progress(self, idx: int, total: int, name: str):
+        self.bulk_status_label.setText(f"Processing {idx + 1}/{total}: {name}")
 
-            # count provinces
-            prov_match = re.search(r"provinces\s*=\s*\{\s*([^}]*)\}", text, re.DOTALL)
-            if not prov_match:
-                continue
-            prov_ids = re.findall(r"\d+", prov_match.group(1))
-            n_provs = len(prov_ids)
-            if n_provs == 0:
-                continue
-
-            # find state ID from file
-            sid_match = re.search(r"\bid\s*=\s*(\d+)", text)
-            state_id = int(sid_match.group(1)) if sid_match else 0
-
-            population = n_provs * pop_per_prov
-
-            cat = "rural"
-            for cat_name, threshold in categories:
-                if n_provs >= threshold:
-                    cat = cat_name
-
-            infra = min(5, max(0, n_provs // 8))
-
-            rng = np.random.default_rng(state_id + 42)
-            resources: dict[str, int] = {}
-            for rn in resource_names:
-                if rng.random() < 0.04:
-                    resources[rn] = int(rng.integers(5, 21))
-                else:
-                    resources[rn] = 0
-
-            # Build resources block
-            res_block = "resources={\n"
-            for rn in resource_names:
-                res_block += f"\t{rn}={resources[rn]}\n"
-            res_block += "}"
-
-            # Remove old resources block if present, then re-insert
-            text = re.sub(r"resources\s*=\s*\{[^}]*\}", "", text, flags=re.DOTALL)
-            text = re.sub(
-                r"(state_category\s*=\s*\w+)",
-                rf"\1\n\t{res_block}",
-                text,
-            )
-
-            # Update population
-            text = re.sub(r"manpower\s*=\s*\d+", f"manpower = {population}", text)
-            if "manpower" not in text:
-                text = re.sub(r"(state_category\s*=\s*\w+)", rf"\1\n\tmanpower = {population}", text)
-
-            # Update state_category
-            text = re.sub(r"state_category\s*=\s*\w+", f"state_category = {cat}", text)
-
-            # Update infrastructure inside buildings block
-            text = re.sub(r"(infrastructure\s*=\s*)\d+", rf"\g<1>{infra}", text)
-
-            sf.write_text(text, encoding="utf-8")
-            updated += 1
-
-        self.bulk_status_label.setText(f"Updated {updated}/{len(state_files)} states.")
+    def _on_bulk_finished(self, updated: int, total: int):
+        self.bulk_pop_button.setEnabled(True)
+        self.bulk_status_label.setText(f"Updated {updated}/{total} states.")
         self.mw.log_panel.log(
-            f"Bulk applied population ({pop_per_prov}/prov) + resources to {updated} states",
+            f"Bulk applied population to {updated} states",
             "success",
         )

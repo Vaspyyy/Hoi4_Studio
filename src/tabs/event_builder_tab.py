@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -41,10 +42,9 @@ _EVENT_TYPE_TAG: dict[str, str] = {
 def _event_tag(evt_type: str) -> str:
     return _EVENT_TYPE_TAG.get(evt_type, evt_type[:10])
 
+
 if TYPE_CHECKING:
     from ..main import MainWindow
-
-from PySide6.QtGui import QUndoStack
 
 
 class EventBuilderTab(QWidget):
@@ -67,15 +67,35 @@ class EventBuilderTab(QWidget):
         form_layout.addWidget(QLabel("Event Type"), 0, 0)
         self.event_type = QComboBox()
         self.event_type.addItem("country_event", "country_event")
-        self.event_type.setItemData(0, "Standard event for a specific country. Trigger: tag = GER", Qt.ItemDataRole.ToolTipRole)
+        self.event_type.setItemData(
+            0,
+            "Standard event for a specific country. Trigger: tag = GER",
+            Qt.ItemDataRole.ToolTipRole,
+        )
         self.event_type.addItem("news_event", "news_event")
-        self.event_type.setItemData(1, "Global news shown to all countries. Good for world announcements.", Qt.ItemDataRole.ToolTipRole)
+        self.event_type.setItemData(
+            1,
+            "Global news shown to all countries. Good for world announcements.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
         self.event_type.addItem("state_event", "state_event")
-        self.event_type.setItemData(2, "Event scoped to a state. Use 'state = 42' in the event body.", Qt.ItemDataRole.ToolTipRole)
+        self.event_type.setItemData(
+            2,
+            "Event scoped to a state. Use 'state = 42' in the event body.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
         self.event_type.addItem("unit_leader_event", "unit_leader_event")
-        self.event_type.setItemData(3, "Event for generals/admirals. FROM is the leader. Good for trait gains.", Qt.ItemDataRole.ToolTipRole)
+        self.event_type.setItemData(
+            3,
+            "Event for generals/admirals. FROM is the leader. Good for trait gains.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
         self.event_type.addItem("operative_leader_event", "operative_leader_event")
-        self.event_type.setItemData(4, "Event for spies/operatives. FROM is the operative. Use for spy missions.", Qt.ItemDataRole.ToolTipRole)
+        self.event_type.setItemData(
+            4,
+            "Event for spies/operatives. FROM is the operative. Use for spy missions.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
         self.event_type.setToolTip("Type of event — determines scope and who receives it")
         form_layout.addWidget(self.event_type, 0, 1)
 
@@ -201,8 +221,8 @@ class EventBuilderTab(QWidget):
     def _get_effect(self) -> str:
         selected_effect = self.opt_effect_dropdown.currentData()
         if selected_effect:
-            return selected_effect
-        return self.opt_custom_effect.text().strip()
+            return str(selected_effect)
+        return str(self.opt_custom_effect.text().strip())
 
     def add_option(self):
         name = self.opt_name.text().strip()

@@ -24,7 +24,7 @@ from ..theme import (
     create_section_title,
     create_hero_title,
 )
-from ..settings import load_settings
+from ..settings import load_settings, save_settings
 
 if TYPE_CHECKING:
     from ..main import MainWindow
@@ -93,7 +93,7 @@ class WelcomeTab(QWidget):
 
     def _refresh_recent(self) -> None:
         self.recent_list.clear()
-        settings = load_settings()
+        settings = self.mw.settings
         for path_str in settings.recent_projects[-10:]:
             p = Path(path_str)
             if p.exists():
@@ -111,7 +111,6 @@ class WelcomeTab(QWidget):
             return
         settings = load_settings()
         settings.mod_root = str(p)
-        from ..settings import save_settings
 
         save_settings(settings)
         self.mw.settings = settings

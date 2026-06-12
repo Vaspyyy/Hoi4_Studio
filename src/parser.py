@@ -323,12 +323,16 @@ def serialize_pdx(node: PdxNode, indent: int = 0) -> str:
 def extract_braced_block(text: str, start_index: int) -> tuple[str, int]:
     depth = 1
     i = start_index
+    in_quote = False
     while i < len(text) and depth > 0:
         c = text[i]
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
+        if c == '"':
+            in_quote = not in_quote
+        elif not in_quote:
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
         i += 1
     if depth != 0:
         raise ValueError("Unbalanced braces")

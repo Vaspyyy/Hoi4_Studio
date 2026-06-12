@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -79,7 +79,11 @@ class LocalizationManagerTab(QWidget):
 
         # Auto-refresh when paths/tags change
         self.mw.tags_changed.connect(self.refresh_localization_entries)
-        self.search.textChanged.connect(self.refresh_list)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(150)
+        self._search_timer.timeout.connect(self.refresh_list)
+        self.search.textChanged.connect(self._search_timer.start)
 
     def refresh_localization_entries(self):
         if not self.mw.paths:
@@ -118,7 +122,9 @@ class LocalizationManagerTab(QWidget):
         value = self.value.text().strip()
         if not key:
             return
-        loc_file = self.mw.paths.mod_root / "localisation/english/zzz_mod_localisation_l_english.yml"
+        loc_file = (
+            self.mw.paths.mod_root / "localisation/english/zzz_mod_localisation_l_english.yml"
+        )
         # Migrate old file content if it exists.
         old_file = self.mw.paths.mod_root / "localisation/english/mod_localisation_l_english.yml"
         if old_file.exists() and not loc_file.exists():
@@ -136,7 +142,9 @@ class LocalizationManagerTab(QWidget):
         if not key or key not in self.entries:
             return
         del self.entries[key]
-        loc_file = self.mw.paths.mod_root / "localisation/english/zzz_mod_localisation_l_english.yml"
+        loc_file = (
+            self.mw.paths.mod_root / "localisation/english/zzz_mod_localisation_l_english.yml"
+        )
         old_file = self.mw.paths.mod_root / "localisation/english/mod_localisation_l_english.yml"
         if old_file.exists() and not loc_file.exists():
             loc_file.write_text(old_file.read_text(encoding="utf-8"), encoding="utf-8")

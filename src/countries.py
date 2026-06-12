@@ -43,8 +43,7 @@ def write_country_definition(mod_root: Path, tag: str, color: Tuple[int, int, in
     p = mod_root / f"common/countries/{tag}.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
-        "graphical_culture = western_european_gfx\n"
-        "graphical_culture_2d = western_european_2d\n",
+        "graphical_culture = western_european_gfx\ngraphical_culture_2d = western_european_2d\n",
         encoding="utf-8",
     )
     write_country_color(mod_root, tag, color)
@@ -163,7 +162,7 @@ def write_localisation_country(mod_root: Path, tag: str, name: str, adj: str) ->
     old = mod_root / f"localisation/english/{tag}_country_l_english.yml"
     if old.exists():
         old.unlink()
-    lines = [f"\ufeffl_english:\n"]
+    lines = ["\ufeffl_english:\n"]
     for suffix in ["", "_neutrality", "_democratic", "_fascism", "_communism"]:
         lines.append(f' {tag}{suffix}:0 "{name}"\n')
         lines.append(f' {tag}{suffix}_DEF:0 "{name}"\n')
@@ -174,10 +173,22 @@ def write_localisation_country(mod_root: Path, tag: str, name: str, adj: str) ->
 
     zzz_mod = mod_root / "localisation/english/zzz_mod_localisation_l_english.yml"
     if zzz_mod.is_file():
-        purge = {f"{tag}{suffix}" for suffix in
-                 ["", "_DEF", "_ADJ", "_neutrality", "_neutrality_DEF",
-                  "_democratic", "_democratic_DEF", "_fascism", "_fascism_DEF",
-                  "_communism", "_communism_DEF"]}
+        purge = {
+            f"{tag}{suffix}"
+            for suffix in [
+                "",
+                "_DEF",
+                "_ADJ",
+                "_neutrality",
+                "_neutrality_DEF",
+                "_democratic",
+                "_democratic_DEF",
+                "_fascism",
+                "_fascism_DEF",
+                "_communism",
+                "_communism_DEF",
+            ]
+        }
         delete_localisation_keys(zzz_mod, purge)
 
 
@@ -254,7 +265,9 @@ def write_character_file(
 
 
 def generate_mod_descriptor(
-    mod_root: Path, user_mods_dir: Path, mod_name: str,
+    mod_root: Path,
+    user_mods_dir: Path,
+    mod_name: str,
     tags: list[str] | None = None,
     replace_paths: list[str] | None = None,
     hoi4_install: Path | None = None,
@@ -297,7 +310,7 @@ def generate_mod_descriptor(
     ]
     for rp in replace_paths:
         blocks.append(f'replace_path="{rp}"')
-    blocks.append(f'tags={{\n\t{tag_block}\n}}')
+    blocks.append(f"tags={{\n\t{tag_block}\n}}")
     blocks.append(f'supported_version="{supported_version}"')
     blocks.append('remote_file_id="<ID>"')
 

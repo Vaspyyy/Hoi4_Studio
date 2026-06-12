@@ -30,35 +30,10 @@ class StateIndexWorker(QThread):
 
     def run(self) -> None:
         try:
-            from .states import STATE_ID_RE, STATE_NAME_KEY_RE, OWNER_RE
+            from .states import build_state_index
 
-            files = sorted(self.states_dir.glob("*.txt"))
-            total = len(files)
-            out = []
-            for i, f in enumerate(files):
-                self.progress.emit(i, total)
-                try:
-                    txt = f.read_text(encoding="utf-8", errors="ignore")
-                    mid = STATE_ID_RE.search(txt)
-                    if not mid:
-                        continue
-                    sid = int(mid.group(1))
-                    mkey = STATE_NAME_KEY_RE.search(txt)
-                    key = mkey.group(1) if mkey else None
-                    name = key or f.name
-                    if key:
-                        for lm in self.loc_maps:
-                            if key in lm:
-                                name = lm[key]
-                                break
-                    owner = None
-                    mo = OWNER_RE.search(txt)
-                    if mo:
-                        owner = mo.group(1)
-                    out.append({"id": sid, "name": name, "owner": owner})
-                except Exception:
-                    continue
-            self.finished.emit(out)
+            result = build_state_index(self.states_dir, self.loc_maps)
+            self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
 

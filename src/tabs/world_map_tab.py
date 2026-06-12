@@ -8,11 +8,9 @@ definition.csv, history/states/*.txt, and common/countries/*.txt files.
 from __future__ import annotations
 
 import csv
-import io
 import logging
 import re
 import subprocess
-import time
 from colorsys import hsv_to_rgb
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -32,6 +30,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPen,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -69,9 +68,20 @@ def _fingerprint(path: Path) -> Optional[tuple[float, int]]:
         return None
 
 
+_fingerprint_cache: dict[str, tuple[float, tuple]] = {}
+
+
 def _fingerprint_dir(d: Path) -> Optional[tuple]:
     if not d.is_dir():
         return None
+    try:
+        dir_mtime = d.stat().st_mtime
+    except OSError:
+        return None
+    key = str(d)
+    cached = _fingerprint_cache.get(key)
+    if cached is not None and cached[0] == dir_mtime:
+        return cached[1]
     entries = []
     try:
         for f in sorted(d.rglob("*")):
@@ -80,7 +90,9 @@ def _fingerprint_dir(d: Path) -> Optional[tuple]:
                 entries.append((str(f), st.st_mtime, st.st_size))
     except OSError:
         return None
-    return tuple(entries)
+    result = tuple(entries)
+    _fingerprint_cache[key] = (dir_mtime, result)
+    return result
 
 
 @dataclass
@@ -104,6 +116,7 @@ class _MapCache:
     border_mask                    : province border overlay (recomputed from provinces_arr)
     country_colors, colors_fp      : TAG→(r,g,b) → colors.txt / country files mtime
     """
+
     provinces_arr: Optional[np.ndarray] = None
     provinces_fp: Optional[tuple] = None
     rgb_to_prov: Optional[dict] = None
@@ -153,14 +166,23 @@ def _parse_country_colors(
     country_tags_dir: Path, countries_dir: Path
 ) -> dict[str, tuple[int, int, int]]:
     colors: dict[str, tuple[int, int, int]] = {}
+    already_read: dict[str, str] = {}
+
+    def _read_file(p: Path) -> str:
+        key = str(p)
+        if key in already_read:
+            return already_read[key]
+        try:
+            txt = p.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            txt = ""
+        already_read[key] = txt
+        return txt
 
     # Primary source: common/countries/colors.txt (HOI4 reads from here)
     colors_txt = countries_dir / "colors.txt"
     if colors_txt.is_file():
-        try:
-            txt = colors_txt.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            txt = ""
+        txt = _read_file(colors_txt)
         # Match blocks like: ABC = { color = rgb { R G B } color_ui = rgb { R G B } }
         for block in re.split(r"\n(?=[A-Z0-9]{3}\s*=)", txt):
             tag_m = re.match(r"^([A-Z0-9]{3})\s*=", block)
@@ -170,16 +192,15 @@ def _parse_country_colors(
             cm = _COLOR_RE.search(block)
             if cm:
                 colors[tag] = (
-                    int(cm.group(1)), int(cm.group(2)), int(cm.group(3)),
+                    int(cm.group(1)),
+                    int(cm.group(2)),
+                    int(cm.group(3)),
                 )
 
     # Fallback: parse country definition files for color = { R G B } lines
     if country_tags_dir.is_dir():
         for tag_file in country_tags_dir.glob("*.txt"):
-            try:
-                txt = tag_file.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                continue
+            txt = _read_file(tag_file)
             for line in txt.splitlines():
                 m = _TAG_FILE_RE.match(line)
                 if not m:
@@ -192,28 +213,26 @@ def _parse_country_colors(
                 country_file = countries_dir / filename
                 if not country_file.exists():
                     continue
-                try:
-                    ctxt = country_file.read_text(encoding="utf-8", errors="ignore")
-                    cm = _COLOR_RE.search(ctxt)
-                    if cm:
-                        colors[tag] = (
-                            int(cm.group(1)), int(cm.group(2)), int(cm.group(3)),
-                        )
-                except Exception:
-                    continue
+                ctxt = _read_file(country_file)
+                cm = _COLOR_RE.search(ctxt)
+                if cm:
+                    colors[tag] = (
+                        int(cm.group(1)),
+                        int(cm.group(2)),
+                        int(cm.group(3)),
+                    )
     if countries_dir.is_dir():
         for f in countries_dir.glob("*.txt"):
             tag = f.stem.upper()
             if len(tag) == 3 and tag.isalpha() and tag not in colors:
-                try:
-                    ctxt = f.read_text(encoding="utf-8", errors="ignore")
-                    cm = _COLOR_RE.search(ctxt)
-                    if cm:
-                        colors[tag] = (
-                            int(cm.group(1)), int(cm.group(2)), int(cm.group(3)),
-                        )
-                except Exception:
-                    continue
+                ctxt = _read_file(f)
+                cm = _COLOR_RE.search(ctxt)
+                if cm:
+                    colors[tag] = (
+                        int(cm.group(1)),
+                        int(cm.group(2)),
+                        int(cm.group(3)),
+                    )
     return colors
 
 
@@ -290,6 +309,8 @@ def _parse_state_owners(
                         pid, val = parts[i], parts[i + 1]
                         if pid not in vp_data or val > vp_data.get(pid, 0):
                             vp_data[pid] = val
+                    if len(parts) % 2 == 1:
+                        vp_data[int(parts[-1])] = 0
 
     return owner_map, prov_to_state, state_names, vp_data
 
@@ -367,7 +388,6 @@ def _resolve_colors(
 def _load_water_texture(
     mod_root: Optional[Path], h: int, w: int, hoi4_install: Optional[Path] = None
 ) -> Optional[np.ndarray]:
-    import logging
     _wl = logging.getLogger("hoi4_studio.world_map")
     for base in [mod_root, hoi4_install]:
         if base is None:
@@ -382,7 +402,9 @@ def _load_water_texture(
                 timeout=30,
             )
             if result.returncode != 0:
-                _wl.debug("ImageMagick stderr: %s", result.stderr.decode(errors="replace").strip()[:500])
+                _wl.debug(
+                    "ImageMagick stderr: %s", result.stderr.decode(errors="replace").strip()[:500]
+                )
                 result = subprocess.run(
                     ["convert", str(dds_path), "-resize", f"{w}x{h}!", "bmp:-"],
                     capture_output=True,
@@ -429,7 +451,8 @@ def _load_rivers_mask(mod_root: Path, h: int, w: int) -> Optional[np.ndarray]:
             mask_img = PILImage.fromarray(mask.astype(np.uint8) * 255)
             mask_img = mask_img.resize((w, h), PILImage.Resampling.NEAREST)
             mask = np.array(mask_img) > 127
-        return mask
+        mask_arr: np.ndarray = mask
+        return mask_arr
     except Exception:
         return None
 
@@ -444,17 +467,19 @@ def _render_political_map(
     ocean_texture: Optional[np.ndarray] = None,
     provinces_arr: Optional[np.ndarray] = None,
     ocean_color: tuple[int, int, int] = (30, 80, 160),
-) -> tuple[np.ndarray, int, int]:
+    resolved_colors: Optional[dict[str, tuple[int, int, int]]] = None,
+) -> tuple[np.ndarray, int, int, int]:
     if provinces_arr is not None:
         arr = provinces_arr
     else:
         img = Image.open(provinces_bmp_path)
-        img = img.convert("RGB")
-        arr = np.array(img, dtype=np.uint8)
+        rgb_img = img.convert("RGB")
+        arr = np.array(rgb_img, dtype=np.uint8)
     h, w, _ = arr.shape
 
     all_tags = set(state_owner.values())
-    resolved_colors = _resolve_colors(country_colors, all_tags)
+    if resolved_colors is None:
+        resolved_colors = _resolve_colors(country_colors, all_tags)
 
     # Ocean fallback color — configurable via AppSettings.map_ocean_r/g/b.
     ocean_r, ocean_g, ocean_b = ocean_color
@@ -482,8 +507,8 @@ def _render_political_map(
         if pid is not None and pid != 0:
             # province is in definition.csv ; if it belongs to a state
             # (prov_to_state) mark it as land; otherwise keep as ocean.
-            sid = prov_to_state.get(pid)
-            if sid is not None:
+            state_id = prov_to_state.get(pid)
+            if state_id is not None:
                 is_ocean[r, g, b] = False
                 # default grey when state has no country owner yet
                 lut[r, g, b] = [128, 128, 128]
@@ -557,10 +582,16 @@ class MapRenderWorker(QThread):
         self.rivers_mask: Optional[np.ndarray] = None
         self.ocean_texture: Optional[np.ndarray] = None
         self._border_mask_result: Optional[np.ndarray] = None
+        self.resolved_colors: dict[str, tuple[int, int, int]] = {}
 
     def run(self) -> None:
         try:
             cache = self._cache
+
+            rgb_to_prov: dict = {}
+            prov_to_state: dict = {}
+            state_owner: dict = {}
+            state_names: dict = {}
 
             with ThreadPoolExecutor(max_workers=4) as pool:
                 fut_def = None
@@ -574,8 +605,8 @@ class MapRenderWorker(QThread):
 
                 if cache and cache.state_owner is not None:
                     state_owner = cache.state_owner
-                    prov_to_state = cache.prov_to_state
-                    state_names = cache.state_names
+                    prov_to_state = cache.prov_to_state or {}
+                    state_names = cache.state_names or {}
                     self.vp_data = cache.vp_data or {}
                     self.prov_names = cache.prov_names or {}
                 else:
@@ -604,6 +635,7 @@ class MapRenderWorker(QThread):
                 if fut_prov:
                     self.provinces_arr = fut_prov.result()
 
+            assert self.provinces_arr is not None
             h, w = self.provinces_arr.shape[:2]
 
             self.rgb_to_prov = rgb_to_prov
@@ -614,15 +646,20 @@ class MapRenderWorker(QThread):
             if cache and cache.prov_centers is not None:
                 self.prov_centers = cache.prov_centers
             elif self.provinces_arr is not None:
+                ocean_texture: np.ndarray | None = None
                 with ThreadPoolExecutor(max_workers=2) as pool:
-                    fut_centers = pool.submit(_compute_prov_centers, self.provinces_arr, rgb_to_prov)
+                    fut_centers = pool.submit(
+                        _compute_prov_centers, self.provinces_arr, rgb_to_prov
+                    )
 
                     if cache and cache.ocean_texture is not None:
                         ocean_texture = cache.ocean_texture
                     elif self.mod_root:
                         has_custom_map = (self.mod_root / "map" / "provinces.bmp").exists()
                         ocean_texture = _load_water_texture(
-                            self.mod_root, h, w,
+                            self.mod_root,
+                            h,
+                            w,
                             hoi4_install=None if has_custom_map else self.hoi4_install,
                         )
                     else:
@@ -637,6 +674,9 @@ class MapRenderWorker(QThread):
             def _progress(current, total):
                 self.progress.emit(current, total)
 
+            all_tags = set(state_owner.values())
+            self.resolved_colors = _resolve_colors(self.country_colors, all_tags)
+
             result_arr, num_states, num_countries, num_unassigned = _render_political_map(
                 self.provinces_bmp_path,
                 rgb_to_prov,
@@ -647,6 +687,7 @@ class MapRenderWorker(QThread):
                 ocean_texture=ocean_texture,
                 provinces_arr=self.provinces_arr,
                 ocean_color=self.ocean_color,
+                resolved_colors=self.resolved_colors,
             )
 
             if cache and cache.border_mask is not None and cache.provinces_arr is not None:
@@ -858,8 +899,21 @@ class LabelComputeWorker(QThread):
             self.finished.emit([])
 
 
+_FONT_METRICS_CACHE: dict[int, QFontMetrics] = {}
+
+
+def _get_font_metrics(size: int) -> QFontMetrics:
+    fm = _FONT_METRICS_CACHE.get(size)
+    if fm is None:
+        fm = QFontMetrics(QFont("Sans Serif", size, QFont.Weight.Bold))
+        _FONT_METRICS_CACHE[size] = fm
+    return fm
+
+
 class _CountryLabelItem(QGraphicsItem):
-    def __init__(self, name: str, spine: list[tuple[float, float]], font_size: float, is_dark: bool = True):
+    def __init__(
+        self, name: str, spine: list[tuple[float, float]], font_size: float, is_dark: bool = True
+    ):
         super().__init__()
         self._name = name
         self._spine = spine
@@ -873,7 +927,7 @@ class _CountryLabelItem(QGraphicsItem):
     def _precompute(self) -> None:
         if not self._spine or not self._name:
             return
-        fm = QFontMetrics(self._font)
+        fm = _get_font_metrics(self._font_size)
         total_w = sum(fm.horizontalAdvance(c) for c in self._name)
         lengths = [0.0]
         for i in range(1, len(self._spine)):
@@ -928,7 +982,7 @@ class _CountryLabelItem(QGraphicsItem):
 
     def paint(self, painter: QPainter, option, widget) -> None:
         painter.setFont(self._font)
-        fm = painter.fontMetrics()
+        fm = _get_font_metrics(self._font_size)
         if self._is_dark:
             outline_color = QColor(0, 0, 0, 200)
             text_color = QColor(255, 255, 255, 230)
@@ -1016,6 +1070,7 @@ class MapGraphicsView(QGraphicsView):
         self._cached_regions: Optional[list[tuple[str, list[tuple[float, float]], float]]] = None
 
         self._show_vp = False
+        self._vp_show_names = False
         self._vp_map: dict[int, int] = {}
         self._prov_centers: dict[int, tuple[float, float]] = {}
         self._prov_names: dict[int, str] = {}
@@ -1118,9 +1173,7 @@ class MapGraphicsView(QGraphicsView):
         if self._cached_regions is not None and not self._labels_dirty:
             self._create_label_items(self._cached_regions)
             return
-        self._label_worker = LabelComputeWorker(
-            self._cached_state_img, self._state_owner
-        )
+        self._label_worker = LabelComputeWorker(self._cached_state_img, self._state_owner)
         self._label_worker.finished.connect(self._on_labels_computed)
         self._label_worker.start()
 
@@ -1190,7 +1243,12 @@ class MapGraphicsView(QGraphicsView):
         return out
 
     def _rebuild_rivers_cache(self) -> None:
-        if self._clean_arr is None or self._rivers_mask is None or not self._show_rivers:
+        if (
+            self._clean_arr is None
+            or self._bordered_arr is None
+            or self._rivers_mask is None
+            or not self._show_rivers
+        ):
             self._rivers_clean_qimg = None
             self._rivers_bordered_qimg = None
             return
@@ -1312,7 +1370,11 @@ class MapGraphicsView(QGraphicsView):
             if self._show_rivers and self._rivers_mask is not None:
                 highlight = self._apply_rivers(highlight)
 
-            if self._state_lut is not None and self._cached_state_img is None:
+            if (
+                self._state_lut is not None
+                and self._cached_state_img is None
+                and self._provinces_arr is not None
+            ):
                 self._cached_state_img = self._state_lut[
                     self._provinces_arr[:, :, 0],
                     self._provinces_arr[:, :, 1],
@@ -1329,17 +1391,17 @@ class MapGraphicsView(QGraphicsView):
             highlighted = np.clip(highlighted + 60, 0, 255).astype(np.uint8)
             highlight[selected_mask] = highlighted
 
-            for sid in self._selected_state_ids:
-                state_mask = state_img == sid
-                neighbor = np.zeros_like(state_mask)
-                neighbor[:-1, :] |= state_img[:-1, :] != state_img[1:, :]
-                neighbor[1:, :] |= state_img[:-1, :] != state_img[1:, :]
-                neighbor[:, :-1] |= state_img[:, :-1] != state_img[:, 1:]
-                neighbor[:, 1:] |= state_img[:, :-1] != state_img[:, 1:]
-                border = neighbor & state_mask
-                highlight[border, 0] = 255
-                highlight[border, 1] = 200
-                highlight[border, 2] = 50
+            selected_arr = np.array(list(self._selected_state_ids), dtype=state_img.dtype)
+            combined_mask = np.isin(state_img, selected_arr)
+            neighbor = np.zeros_like(combined_mask)
+            neighbor[:-1, :] |= state_img[:-1, :] != state_img[1:, :]
+            neighbor[1:, :] |= state_img[:-1, :] != state_img[1:, :]
+            neighbor[:, :-1] |= state_img[:, :-1] != state_img[:, 1:]
+            neighbor[:, 1:] |= state_img[:, :-1] != state_img[:, 1:]
+            border = neighbor & combined_mask
+            highlight[border, 0] = 255
+            highlight[border, 1] = 200
+            highlight[border, 2] = 50
 
             self._highlight_qimg = self._arr_to_qimage(highlight)
         except Exception:
@@ -1427,9 +1489,7 @@ class MapGraphicsView(QGraphicsView):
             if self._rubber_band_item is None:
                 pen = QPen(QColor(0, 180, 255), 2, Qt.PenStyle.DashLine)
                 pen.setCosmetic(True)  # 1px regardless of zoom
-                self._rubber_band_item = self._scene.addRect(
-                    rect, pen, QColor(0, 180, 255, 40)
-                )
+                self._rubber_band_item = self._scene.addRect(rect, pen, QColor(0, 180, 255, 40))
             else:
                 self._rubber_band_item.setRect(rect)
             event.accept()
@@ -1552,64 +1612,78 @@ class CountryLegendWidget(QWidget):
         self._label_stylesheet = "font-weight: 700; font-size: 13px; padding: 4px 0;"
         self._name_stylesheet = "font-size: 12px;"
         self._border_color = border_color
+        self._header: Optional[QLabel] = None
+        self._rows: list[QWidget] = []
+        self._row_swatches: list[QLabel] = []
+        self._row_names: list[QLabel] = []
+        self._unassigned_row: Optional[QWidget] = None
+        self._unassigned_swatch: Optional[QLabel] = None
         self._layout.addStretch()
 
+    def _make_row(self, name_text: str = "") -> tuple[QWidget, QLabel, QLabel]:
+        row = QWidget()
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(2, 2, 2, 2)
+        hl.setSpacing(6)
+        swatch = QLabel()
+        swatch.setFixedSize(20, 14)
+        name = QLabel(name_text)
+        name.setStyleSheet(self._name_stylesheet)
+        hl.addWidget(swatch)
+        hl.addWidget(name)
+        hl.addStretch()
+        return row, swatch, name
+
     def update_legend(
-        self, country_colors: dict[str, tuple[int, int, int]], detected_tags: set[str],
+        self,
+        country_colors: dict[str, tuple[int, int, int]],
+        detected_tags: set[str],
         num_unassigned: int = 0,
     ) -> None:
-        while self._layout.count() > 1:
-            item = self._layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-
         header_text = f"Countries ({len(detected_tags)})"
         if num_unassigned > 0:
             header_text += f" + {num_unassigned} Unassigned"
-        header = QLabel(header_text)
-        header.setStyleSheet(self._label_stylesheet)
-        self._layout.insertWidget(0, header)
+
+        if self._header is None:
+            self._header = QLabel(header_text)
+            self._header.setStyleSheet(self._label_stylesheet)
+            self._layout.insertWidget(0, self._header)
+        else:
+            self._header.setText(header_text)
 
         sorted_tags = sorted(detected_tags)
-        for i, tag in enumerate(sorted_tags):
-            row = QWidget()
-            hl = QHBoxLayout(row)
-            hl.setContentsMargins(2, 2, 2, 2)
-            hl.setSpacing(6)
 
-            swatch = QLabel()
+        while len(self._rows) < len(sorted_tags):
+            row, swatch, name = self._make_row()
+            self._rows.append(row)
+            self._row_swatches.append(swatch)
+            self._row_names.append(name)
+
+        for i, tag in enumerate(sorted_tags):
+            row = self._rows[i]
             r, g, b = country_colors.get(tag, (128, 128, 128))
-            swatch.setFixedSize(20, 14)
-            swatch.setStyleSheet(
+            self._row_swatches[i].setStyleSheet(
                 f"background-color: rgb({r},{g},{b}); border: 1px solid {self._border_color}; border-radius: 3px;"
             )
+            self._row_names[i].setText(tag)
+            if row.parent() is None:
+                self._layout.insertWidget(i + 1, row)
+            row.show()
 
-            name = QLabel(tag)
-            name.setStyleSheet(self._name_stylesheet)
-            hl.addWidget(swatch)
-            hl.addWidget(name)
-            hl.addStretch()
+        for i in range(len(sorted_tags), len(self._rows)):
+            self._rows[i].hide()
 
-            self._layout.insertWidget(i + 1, row)
-
-        # append "Unassigned" swatch when states have no owner
         if num_unassigned > 0:
-            row = QWidget()
-            hl = QHBoxLayout(row)
-            hl.setContentsMargins(2, 2, 2, 2)
-            hl.setSpacing(6)
-            swatch = QLabel()
-            swatch.setFixedSize(20, 14)
-            swatch.setStyleSheet(
-                f"background-color: rgb(128,128,128); border: 1px solid {self._border_color}; border-radius: 3px;"
-            )
-            name = QLabel("Unassigned")
-            name.setStyleSheet(self._name_stylesheet)
-            hl.addWidget(swatch)
-            hl.addWidget(name)
-            hl.addStretch()
-            self._layout.insertWidget(len(sorted_tags) + 1, row)
+            if self._unassigned_row is None:
+                self._unassigned_row, self._unassigned_swatch, _ = self._make_row("Unassigned")
+                self._unassigned_swatch.setStyleSheet(
+                    f"background-color: rgb(128,128,128); border: 1px solid {self._border_color}; border-radius: 3px;"
+                )
+            if self._unassigned_row.parent() is None:
+                self._layout.insertWidget(len(sorted_tags) + 1, self._unassigned_row)
+            self._unassigned_row.show()
+        elif self._unassigned_row is not None:
+            self._unassigned_row.hide()
 
 
 class WorldMapTab(QWidget):
@@ -1627,7 +1701,7 @@ class WorldMapTab(QWidget):
         self._fake_progress = 0
         self._fake_timer.timeout.connect(self._tick_fake_progress)
 
-        from ..theme import get_colors, ThemeColors
+        from ..theme import get_colors
 
         self._colors = get_colors(mw.settings.theme)
         self.map_view = MapGraphicsView(is_dark=(mw.settings.theme == "dark"))
@@ -1764,7 +1838,9 @@ class WorldMapTab(QWidget):
         QMessageBox.information(self, "Map Files Not Found", msg)
 
     def _browse_provinces_bmp(self) -> None:
-        start_dir = str(self.mw.paths.mod_root / "map") if self.mw.paths and self.mw.paths.mod_root else ""
+        start_dir = (
+            str(self.mw.paths.mod_root / "map") if self.mw.paths and self.mw.paths.mod_root else ""
+        )
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select provinces.bmp",
@@ -1776,7 +1852,9 @@ class WorldMapTab(QWidget):
             self.status_label.setText(f"provinces: {self._provinces_bmp_path.name}")
 
     def _browse_definition_csv(self) -> None:
-        start_dir = str(self.mw.paths.mod_root / "map") if self.mw.paths and self.mw.paths.mod_root else ""
+        start_dir = (
+            str(self.mw.paths.mod_root / "map") if self.mw.paths and self.mw.paths.mod_root else ""
+        )
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select definition.csv",
@@ -1883,6 +1961,13 @@ class WorldMapTab(QWidget):
             colors_dirs.append(mod_root / "common" / "countries")
         colors_fp = tuple(_fingerprint_dir(d) for d in colors_dirs)
 
+        if colors_fp != c.colors_fp:
+            c.country_colors = None
+        if c.country_colors is not None:
+            country_colors = c.country_colors
+        else:
+            country_colors = self._load_country_colors()
+
         worker_cache = _MapCache()
 
         if prov_fp is not None and prov_fp == c.provinces_fp and c.provinces_arr is not None:
@@ -1905,8 +1990,6 @@ class WorldMapTab(QWidget):
         if not border_deps_changed and c.border_mask is not None:
             worker_cache.border_mask = c.border_mask
 
-        if colors_fp != c.colors_fp:
-            c.country_colors = None
         if c.country_colors is not None:
             worker_cache.country_colors = c.country_colors
 
@@ -1950,11 +2033,16 @@ class WorldMapTab(QWidget):
     def _tick_fake_progress(self) -> None:
         remaining = 90 - self._fake_progress
         if remaining > 0:
-            self._fake_progress += max(1, remaining * 0.06)
+            self._fake_progress = int(self._fake_progress + max(1, remaining * 0.06))
             self.progress.setValue(int(self._fake_progress))
 
     def _on_render_finished(
-        self, qimg_clean: QImage, qimg_bordered: QImage, num_states: int, num_countries: int, num_unassigned: int
+        self,
+        qimg_clean: QImage,
+        qimg_bordered: QImage,
+        num_states: int,
+        num_countries: int,
+        num_unassigned: int,
     ) -> None:
         self._fake_timer.stop()
         self.progress.setValue(100)
@@ -1963,14 +2051,15 @@ class WorldMapTab(QWidget):
 
         detected_tags: set[str] = set()
         if self._worker is not None:
-            self.map_view.set_map_data(
-                self._worker.provinces_arr,
-                self._worker.rgb_to_prov,
-                self._worker.prov_to_state,
-                self._worker.state_owner,
-                self._worker.state_names,
-                self._worker.localisation,
-            )
+            if self._worker.provinces_arr is not None:
+                self.map_view.set_map_data(
+                    self._worker.provinces_arr,
+                    self._worker.rgb_to_prov,
+                    self._worker.prov_to_state,
+                    self._worker.state_owner,
+                    self._worker.state_names,
+                    self._worker.localisation,
+                )
             self.map_view.set_vp_data(
                 getattr(self._worker, "vp_data", {}),
                 getattr(self._worker, "prov_centers", {}),
@@ -1978,7 +2067,7 @@ class WorldMapTab(QWidget):
             self.map_view.set_prov_names(
                 getattr(self._worker, "prov_names", {}),
             )
-            if self._worker.clean_arr is not None:
+            if self._worker.clean_arr is not None and self._worker.bordered_arr is not None:
                 self.map_view.set_render_arrays(
                     self._worker.clean_arr,
                     self._worker.bordered_arr,
@@ -2015,7 +2104,12 @@ class WorldMapTab(QWidget):
                 c.border_mask = self._worker._border_mask_result
 
         self.legend.update_legend(
-            _resolve_colors(self._country_colors, detected_tags), detected_tags,
+            getattr(
+                self._worker,
+                "resolved_colors",
+                _resolve_colors(self._country_colors, detected_tags),
+            ),
+            detected_tags,
             num_unassigned=num_unassigned,
         )
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QComboBox,
@@ -57,6 +57,7 @@ class FocusNodeItem(QGraphicsRectItem):
         self.focus_id = focus_id
         self._drag_target: Optional[str] = None
         self._colors = colors
+        self._redraw_timer: Optional[QTimer] = None
 
         self.setPos(x * 40, y * 40)
         self.setFlags(
@@ -88,7 +89,9 @@ class FocusNodeItem(QGraphicsRectItem):
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             if self.tab:
-                self.tab.redraw_links()
+                if self._redraw_timer is not None:
+                    self._redraw_timer.stop()
+                self._redraw_timer = QTimer.singleShot(30, self.tab.redraw_links)
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event):
@@ -665,7 +668,6 @@ class FocusTab(QWidget):
 
     def _apply_zoom(self, val: int):
         factor = val / 100.0
-        self.view.setTransform(self.view.transform().scale(1, 1))
         from PySide6.QtGui import QTransform
 
         t = QTransform()

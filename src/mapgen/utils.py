@@ -24,15 +24,16 @@ def color_from_id(index: int, ptype: str) -> tuple[int, int, int]:
     rng = np.random.default_rng(index + 1)
     while True:
         if ptype == "ocean":
-            r = rng.integers(0, 60)
-            g = rng.integers(0, 80)
-            b = rng.integers(100, 180)
+            r = int(rng.integers(0, 60))
+            g = int(rng.integers(0, 80))
+            b = int(rng.integers(100, 180))
         elif ptype == "lake":
-            r = rng.integers(0, 80)
-            g = rng.integers(80, 180)
-            b = rng.integers(100, 200)
+            r = int(rng.integers(0, 80))
+            g = int(rng.integers(80, 180))
+            b = int(rng.integers(100, 200))
         else:
-            r, g, b = map(int, rng.integers(0, 256, 3))
+            r_arr, g_arr, b_arr = rng.integers(0, 256, 3)
+            r, g, b = int(r_arr), int(g_arr), int(b_arr)
 
         color = (int(r), int(g), int(b))
         if color not in used_colors:
@@ -216,7 +217,7 @@ def assign_regions(
         coords_yx = np.column_stack(np.where(mask))
         coords_xy = np.flip(coords_yx, axis=1).astype(np.float32)
         query_xy = coords_xy
-        if jitter_x is not None:
+        if jitter_x is not None and jitter_y is not None:
             query_xy = _jitter_coords(coords_xy, coords_yx, jitter_x, jitter_y)
         tree = cKDTree(seeds_arr)
         _, labels = tree.query(query_xy, k=1)
@@ -237,7 +238,7 @@ def assign_regions(
             coords_yx = np.column_stack(np.where(comp_mask))
             coords_xy = np.flip(coords_yx, axis=1).astype(np.float32)
             query_xy = coords_xy
-            if jitter_x is not None:
+            if jitter_x is not None and jitter_y is not None:
                 query_xy = _jitter_coords(coords_xy, coords_yx, jitter_x, jitter_y)
 
             local_seeds = seeds_arr[seed_indices]
@@ -261,12 +262,14 @@ def assign_regions(
 
 def is_sea_color(arr: np.ndarray) -> np.ndarray:
     r, g, b = config.OCEAN_COLOR
-    return (arr[..., 0] == r) & (arr[..., 1] == g) & (arr[..., 2] == b)
+    result: np.ndarray = (arr[..., 0] == r) & (arr[..., 1] == g) & (arr[..., 2] == b)
+    return result
 
 
 def is_lake_color(arr: np.ndarray) -> np.ndarray:
     r, g, b = config.LAKE_COLOR
-    return (arr[..., 0] == r) & (arr[..., 1] == g) & (arr[..., 2] == b)
+    result: np.ndarray = (arr[..., 0] == r) & (arr[..., 1] == g) & (arr[..., 2] == b)
+    return result
 
 
 def assign_borders(pmap: np.ndarray, border_mask: np.ndarray) -> None:
@@ -289,6 +292,7 @@ def combine_maps(
     if land_map is not None and land_map.size > 0:
         h, w = land_map.shape
     else:
+        assert sea_map is not None
         h, w = sea_map.shape
 
     combined = np.full((h, w), -1, np.int32)

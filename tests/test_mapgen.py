@@ -324,8 +324,8 @@ class TestExportBuildingsTxt:
         assert len(lines) == 4
         for line in lines:
             parts = line.split(";")
-            assert parts[0] == "5"   # state_id first
-            assert parts[6] == "1"   # province_id last
+            assert parts[0] == "5"  # state_id first
+            assert parts[6] == "1"  # province_id last
 
     def test_no_infrastructure(self) -> None:
         """Infrastructure is NOT a valid building type in buildings.txt."""
@@ -410,12 +410,13 @@ class TestExportBuildingsTxt:
         for line in content.strip().split("\n"):
             parts = line.split(";")
             assert parts[3] == "10.00"  # z
-            assert parts[5] == "0.00"   # rotation
+            assert parts[5] == "0.00"  # rotation
 
 
 # ---------------------------------------------------------------------------
 # supply_nodes.txt
 # ---------------------------------------------------------------------------
+
 
 class TestExportSupplyNodes:
     def test_format_level_pid(self) -> None:
@@ -470,6 +471,7 @@ class TestExportSupplyNodes:
 # railways.txt
 # ---------------------------------------------------------------------------
 
+
 class TestExportRailwaysTxt:
     def test_water_excluded(self) -> None:
         """No railways through water provinces."""
@@ -519,6 +521,7 @@ class TestExportRailwaysTxt:
 # ---------------------------------------------------------------------------
 # strategic regions
 # ---------------------------------------------------------------------------
+
 
 class TestExportStrategicRegions:
     def test_creates_file_per_territory(self) -> None:
@@ -574,6 +577,7 @@ class TestExportStrategicRegions:
 # ---------------------------------------------------------------------------
 # states
 # ---------------------------------------------------------------------------
+
 
 class TestExportStates:
     def test_creates_file_per_land_territory(self) -> None:

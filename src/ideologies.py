@@ -95,12 +95,12 @@ def _extract_modifiers(block: PdxNode) -> dict[str, str]:
     mod_node = block.get_block("modifiers")
     if mod_node:
         for child in mod_node.children:
-            if child.is_assignment():
-                mods[child.key] = child.value
+            if child.is_assignment() and child.key is not None:
+                mods[child.key] = child.value or ""
             elif child.is_block() and child.key == "hidden_modifier":
                 for hc in child.children:
-                    if hc.is_assignment():
-                        mods[hc.key] = hc.value
+                    if hc.is_assignment() and hc.key is not None:
+                        mods[hc.key] = hc.value or ""
     return mods
 
 
@@ -153,10 +153,14 @@ def _parse_one_ideology(key: str, block: PdxNode, is_vanilla: bool = False) -> I
         dynamic_faction_names=_extract_faction_names(block),
         ai_behavior=ai_behavior,
         ai_ideology_wanted_units_factor=block.get_float("ai_ideology_wanted_units_factor", 1.0),
-        ai_give_core_state_control_threshold=block.get_int("ai_give_core_state_control_threshold", 0),
+        ai_give_core_state_control_threshold=block.get_int(
+            "ai_give_core_state_control_threshold", 0
+        ),
         war_impact_on_world_tension=block.get_float("war_impact_on_world_tension", 0.25),
         faction_impact_on_world_tension=block.get_float("faction_impact_on_world_tension", 0.1),
-        can_host_government_in_exile=_str_to_bool(block.get_value("can_host_government_in_exile", "no")),
+        can_host_government_in_exile=_str_to_bool(
+            block.get_value("can_host_government_in_exile", "no")
+        ),
         can_collaborate=_str_to_bool(block.get_value("can_collaborate", "no")),
         is_vanilla=is_vanilla,
         effects=_extract_effects(block),
@@ -292,7 +296,9 @@ def serialize_ideology(ideo: IdeologyDef) -> str:
     if ideo.war_impact_on_world_tension != 0.25:
         parts.append(f"\t\twar_impact_on_world_tension = {ideo.war_impact_on_world_tension}")
     if ideo.faction_impact_on_world_tension != 0.1:
-        parts.append(f"\t\tfaction_impact_on_world_tension = {ideo.faction_impact_on_world_tension}")
+        parts.append(
+            f"\t\tfaction_impact_on_world_tension = {ideo.faction_impact_on_world_tension}"
+        )
 
     if ideo.rules:
         parts.append(_write_rules_block(ideo.rules))
@@ -307,7 +313,9 @@ def serialize_ideology(ideo: IdeologyDef) -> str:
 
     if ideo.faction_modifiers:
         fm_lines = ["\t\tfaction_modifiers = {"]
-        fm_pairs = [(k, v) for k, v in ideo.faction_modifiers.items() if k is not None and v is not None]
+        fm_pairs = [
+            (k, v) for k, v in ideo.faction_modifiers.items() if k is not None and v is not None
+        ]
         for k, v in sorted(fm_pairs):
             fm_lines.append(f"\t\t\t{k} = {v}")
         fm_lines.append("\t\t}")
@@ -317,10 +325,14 @@ def serialize_ideology(ideo: IdeologyDef) -> str:
         parts.append(f"\t\tai_{ideo.ai_behavior} = yes")
 
     if ideo.ai_ideology_wanted_units_factor != 1.0:
-        parts.append(f"\t\tai_ideology_wanted_units_factor = {ideo.ai_ideology_wanted_units_factor}")
+        parts.append(
+            f"\t\tai_ideology_wanted_units_factor = {ideo.ai_ideology_wanted_units_factor}"
+        )
 
     if ideo.ai_give_core_state_control_threshold != 0:
-        parts.append(f"\t\tai_give_core_state_control_threshold = {ideo.ai_give_core_state_control_threshold}")
+        parts.append(
+            f"\t\tai_give_core_state_control_threshold = {ideo.ai_give_core_state_control_threshold}"
+        )
 
     if ideo.effects:
         parts.append(_write_effects_block(ideo.effects))

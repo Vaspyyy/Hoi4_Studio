@@ -210,7 +210,11 @@ MODIFIER_CATEGORIES: list[tuple[str, list[tuple[str, str, str]]]] = [
         [
             ("Production Efficiency Cap", "production_factory_max_efficiency_factor", "0.10"),
             ("Production Efficiency Growth", "production_factory_efficiency_gain_factor", "0.10"),
-            ("Production Efficiency Retention", "production_factory_efficiency_retention_factor", "0.10"),
+            (
+                "Production Efficiency Retention",
+                "production_factory_efficiency_retention_factor",
+                "0.10",
+            ),
             ("Dockyard Output", "naval_dockyard_output_factor", "0.10"),
         ],
     ),

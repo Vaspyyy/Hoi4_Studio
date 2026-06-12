@@ -92,8 +92,10 @@ class SlidingTabWidget(QWidget):
         if new_idx < 0 or new_idx >= len(self._pages):
             return
         if self._animating:
-            self._anim_old.stop()
-            self._anim_new.stop()
+            if self._anim_old is not None:
+                self._anim_old.stop()
+            if self._anim_new is not None:
+                self._anim_new.stop()
             for page in self._pages:
                 page.hide()
             self._pages[self._current_index].setGeometry(self._container.rect())

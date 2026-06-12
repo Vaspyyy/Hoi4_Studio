@@ -72,7 +72,6 @@ ideologies = {
 
 
 class TestParseIdeologies:
-
     def test_parses_vanilla_democratic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             v = _make_vanilla_install(_VANILLA_TXT, Path(tmp))
@@ -150,7 +149,6 @@ class TestParseIdeologies:
 
 
 class TestParseMergeVanillaMod:
-
     def test_mod_overrides_vanilla_color(self) -> None:
         mod_txt = """ideologies = {
             democratic = {
@@ -202,7 +200,6 @@ class TestParseMergeVanillaMod:
 
 
 class TestSerializeIdeology:
-
     def test_serialize_basic(self) -> None:
         ideo = IdeologyDef(
             key="monarchism",
@@ -238,7 +235,12 @@ class TestSerializeIdeology:
         assert "war_impact_on_world_tension" not in out
 
     def test_serialize_with_collaborate_and_exile(self) -> None:
-        ideo = IdeologyDef(key="test", color=(200, 200, 200), can_collaborate=True, can_host_government_in_exile=True)
+        ideo = IdeologyDef(
+            key="test",
+            color=(200, 200, 200),
+            can_collaborate=True,
+            can_host_government_in_exile=True,
+        )
         out = serialize_ideology(ideo)
         assert "can_collaborate = yes" in out
         assert "can_host_government_in_exile = yes" in out
@@ -248,7 +250,10 @@ class TestSerializeIdeology:
         original = IdeologyDef(
             key="roundtrip",
             color=(123, 45, 67),
-            types=[SubIdeology(name="foo"), SubIdeology(name="bar", can_be_randomly_selected=False)],
+            types=[
+                SubIdeology(name="foo"),
+                SubIdeology(name="bar", can_be_randomly_selected=False),
+            ],
             rules={"can_force_government": "yes", "can_send_volunteers": "no"},
             modifiers={"generate_wargoal_tension": "0.75", "join_faction_tension": "-0.2"},
             ai_behavior="neutral",
@@ -275,7 +280,6 @@ class TestSerializeIdeology:
 
 
 class TestWriteIdeologies:
-
     def test_writes_custom_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -306,7 +310,6 @@ class TestWriteIdeologies:
 
 
 class TestResolveSubIdeologyLoc:
-
     def test_exact_key_match(self) -> None:
         loc = {"stalinism": "Stalinism", "stalinism_desc": "A form of Marxism-Leninism"}
         result = resolve_sub_ideology_loc("stalinism", loc)
@@ -328,7 +331,6 @@ class TestResolveSubIdeologyLoc:
 
 
 class TestParseIdeologyEdgeCases:
-
     def test_empty_ideologies_returns_empty_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             v = _make_vanilla_install("ideologies = { }", Path(tmp))
@@ -387,7 +389,6 @@ class TestParseIdeologyEdgeCases:
 
 
 class TestSerializeNoneResilience:
-
     def test_none_key_in_modifiers_does_not_crash(self) -> None:
         """None keys in modifiers dict should be silently skipped."""
         ideo = IdeologyDef(key="test", color=(10, 20, 30))

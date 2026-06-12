@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
-from PySide6.QtCore import QEvent, QObject, QThread, Qt, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..widgets import BlockScrollFilter
 from ..mapgen import config as mg_config
 from ..mapgen.density_generator import create_equator_density, create_uniform_density
 from ..mapgen.hoi4_export import export_all_map_files
@@ -30,7 +31,6 @@ from ..mapgen.province_generator import generate_provinces
 from ..mapgen.territory_generator import generate_territories
 from ..theme import AnimatedButton, create_card_widget, create_section_title
 from ..countries import generate_mod_descriptor
-from ..settings import save_settings
 
 if TYPE_CHECKING:
     from ..main import MainWindow
@@ -95,6 +95,7 @@ class MapGenWorker(QThread):
 
 class ExportWorker(QThread):
     """Runs the full map export in a background thread."""
+
     progress_msg = Signal(str)
     finished = Signal(dict)
     error = Signal(str)
@@ -302,7 +303,7 @@ class MapGeneratorTab(QWidget):
 
     def _build_image_inputs(self, layout: QVBoxLayout) -> None:
         section_label = QLabel(
-            '<b>1. Input Images</b> &nbsp;'
+            "<b>1. Input Images</b> &nbsp;"
             '<span style="color:#f87171;font-size:10px;">REQUIRED</span> = land/ocean map. '
             '<span style="color:#888;font-size:10px;">optional</span> = everything else.'
         )
@@ -410,7 +411,7 @@ class MapGeneratorTab(QWidget):
         w, h = rgb.size
         scale = min(max_size[0] / w, max_size[1] / h, 1.0)
         if scale < 1.0:
-            rgb = rgb.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            rgb = rgb.resize((int(w * scale), int(h * scale)), Image.LANCZOS)  # type: ignore[attr-defined]
         # write to BytesIO as a proper image format Qt can parse
         buf = io.BytesIO()
         rgb.save(buf, "BMP")
@@ -450,9 +451,7 @@ class MapGeneratorTab(QWidget):
         if path:
             Image.MAX_IMAGE_PIXELS = mg_config.MAX_IMAGE_PIXELS
             self._terrain_image = Image.open(path).convert("RGB")
-            self._set_preview_image(
-                self.terrain_preview_input, self._terrain_image.convert("RGBA")
-            )
+            self._set_preview_image(self.terrain_preview_input, self._terrain_image.convert("RGBA"))
             self.terrain_preview_input.setToolTip(f"Terrain: {path}")
 
     def _density_uniform(self) -> None:
@@ -475,7 +474,7 @@ class MapGeneratorTab(QWidget):
         path, _ = QFileDialog.getOpenFileName(
             self, title, "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
         )
-        return path
+        return str(path)
 
     # ── territory settings ────────────────────────────────────────────
 
@@ -579,9 +578,7 @@ class MapGeneratorTab(QWidget):
             "Add irregular borders to land provinces for a natural look."
         )
         self.prov_jagged_ocean = QCheckBox("Jagged Ocean")
-        self.prov_jagged_ocean.setToolTip(
-            "Add irregular borders to ocean provinces."
-        )
+        self.prov_jagged_ocean.setToolTip("Add irregular borders to ocean provinces.")
         self.prov_exclude_ocean = QCheckBox("Exclude Ocean from Density")
         self.prov_exclude_ocean.setToolTip(
             "ON (recommended): Ocean doesn't compete for province slots. "
@@ -645,12 +642,7 @@ class MapGeneratorTab(QWidget):
         slider.valueChanged.connect(spin.setValue)
         spin.valueChanged.connect(slider.setValue)
 
-        class _Blocker(QObject):
-            def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-                if event.type() == QEvent.Type.Wheel:
-                    return True
-                return super().eventFilter(obj, event)
-        spin.installEventFilter(_Blocker(spin))
+        spin.installEventFilter(BlockScrollFilter(spin))
 
         return slider, spin
 
@@ -680,7 +672,8 @@ class MapGeneratorTab(QWidget):
     def _on_generate_territories(self) -> None:
         if self._land_image is None:
             QMessageBox.warning(
-                self, "Missing Input",
+                self,
+                "Missing Input",
                 "Load a land/ocean image first (step 1).\n\n"
                 "Ocean pixels must be exactly RGB(5,20,18). "
                 "Any other color = land.",
@@ -724,14 +717,13 @@ class MapGeneratorTab(QWidget):
         self.btn_export_all.setEnabled(False)
         self.progress.setVisible(False)
         self._update_step_highlight(1)
-        self.mw.log_panel.log(
-            f"Generated {len(result.metadata)} territories", "success"
-        )
+        self.mw.log_panel.log(f"Generated {len(result.metadata)} territories", "success")
 
     def _on_generate_provinces(self) -> None:
         if self._territory_result is None:
             QMessageBox.warning(
-                self, "Missing Step",
+                self,
+                "Missing Step",
                 "Generate territories first (step 2), then subdivide into provinces.",
             )
             return
@@ -770,9 +762,7 @@ class MapGeneratorTab(QWidget):
         self.btn_export_all.setEnabled(True)
         self.progress.setVisible(False)
         self._update_step_highlight(2)
-        self.mw.log_panel.log(
-            f"Generated {len(result.metadata)} provinces", "success"
-        )
+        self.mw.log_panel.log(f"Generated {len(result.metadata)} provinces", "success")
 
     def _on_generation_error(self, msg: str) -> None:
         self.progress.setVisible(False)
@@ -786,7 +776,8 @@ class MapGeneratorTab(QWidget):
     def _require_mod_root(self) -> Path | None:
         if not self.mw.paths or not self.mw.paths.mod_root:
             QMessageBox.critical(
-                self, "No Project",
+                self,
+                "No Project",
                 "Open or create a mod project first before exporting.",
             )
             return None
@@ -862,7 +853,8 @@ class MapGeneratorTab(QWidget):
             pass
 
         QMessageBox.information(
-            self, "Export Complete",
+            self,
+            "Export Complete",
             f"Map exported to your mod folder.\n\n"
             f"Files written: {len(results)}\n"
             f"Location: {mod_root}/map/\n\n"

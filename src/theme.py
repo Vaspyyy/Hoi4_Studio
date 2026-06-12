@@ -24,7 +24,6 @@ from PySide6.QtGui import (
     QPainter,
     QIcon,
     QLinearGradient,
-    QPen,
     QBrush,
 )
 from PySide6.QtWidgets import (
@@ -391,7 +390,7 @@ QScrollBar::handle:horizontal:hover {{
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0;
 }}
-QScrollBar::add-page:horizontal, QScrollBar::add-page:horizontal {{
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
     background: none;
 }}
 QGraphicsView {{
@@ -608,6 +607,7 @@ class AnimatedButton(QPushButton):
 
 # ── Retained animation widgets (subtle, not SaaS-y) ───────────────
 
+
 class FadeInWidget(QWidget):
     """Subtle fade-in for content areas. No glow, no pulse."""
 
@@ -630,6 +630,7 @@ class FadeInWidget(QWidget):
 
 
 # ── Layout helpers ─────────────────────────────────────────────────
+
 
 def apply_theme(app: QApplication, theme_name: str) -> None:
     colors = THEMES.get(theme_name, DARK_COLORS)

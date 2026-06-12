@@ -1,27 +1,27 @@
-from .welcome_tab import WelcomeTab
-from .project_tab import ProjectTab
-from .country_tab import CountryTab
-from .states_tab import StatesTab
-from .state_properties_tab import StatePropertiesTab
-from .state_browser_tab import StateBrowserTab
-from .event_builder_tab import EventBuilderTab
-from .focus_tab import FocusTab
-from .ideas_tab import IdeasTab
-from .localization_tab import LocalizationManagerTab
-from .map_generator_tab import MapGeneratorTab
-from .bookmark_tab import BookmarkTab
+from __future__ import annotations
 
-__all__ = [
-    "WelcomeTab",
-    "ProjectTab",
-    "CountryTab",
-    "StatesTab",
-    "StatePropertiesTab",
-    "StateBrowserTab",
-    "EventBuilderTab",
-    "FocusTab",
-    "IdeasTab",
-    "LocalizationManagerTab",
-    "MapGeneratorTab",
-    "BookmarkTab",
-]
+import importlib
+
+_lazy = {
+    "WelcomeTab": ".welcome_tab",
+    "ProjectTab": ".project_tab",
+    "CountryTab": ".country_tab",
+    "StatesTab": ".states_tab",
+    "StatePropertiesTab": ".state_properties_tab",
+    "StateBrowserTab": ".state_browser_tab",
+    "EventBuilderTab": ".event_builder_tab",
+    "FocusTab": ".focus_tab",
+    "IdeasTab": ".ideas_tab",
+    "LocalizationManagerTab": ".localization_tab",
+    "MapGeneratorTab": ".map_generator_tab",
+    "BookmarkTab": ".bookmark_tab",
+}
+
+__all__ = list(_lazy.keys())
+
+
+def __getattr__(name: str):
+    if name in _lazy:
+        mod = importlib.import_module(_lazy[name], __name__)
+        return getattr(mod, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

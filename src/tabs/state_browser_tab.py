@@ -39,7 +39,7 @@ class StateBrowserTab(QWidget):
         self.mw = mw
         self.state_index: list[dict] = []
         self.selected: set[int] = set()
-        self._index_worker = None
+        self._index_worker: StateIndexWorker | None = None
         self._apply_worker: StateApplyWorker | None = None
         self._apply_tag: str = ""
 

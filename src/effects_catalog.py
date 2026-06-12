@@ -15,15 +15,19 @@ def _build_ideology_effects(ideologies: dict | None) -> list[tuple[str, str]]:
         return _HARDCODED_IDEOLOGY_EFFECTS
     result: list[tuple[str, str]] = []
     for key in sorted(ideologies):
-        result.append((
-            f"Add Popularity ({key})",
-            f"add_popularity = {{ ideology = {key} popularity = 0.1 }}",
-        ))
+        result.append(
+            (
+                f"Add Popularity ({key})",
+                f"add_popularity = {{ ideology = {key} popularity = 0.1 }}",
+            )
+        )
     for key in sorted(ideologies):
-        result.append((
-            f"Set Ruling Party ({key})",
-            f"set_politics = {{ ruling_party = {key} }}",
-        ))
+        result.append(
+            (
+                f"Set Ruling Party ({key})",
+                f"set_politics = {{ ruling_party = {key} }}",
+            )
+        )
     return result
 
 

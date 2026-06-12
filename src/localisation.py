@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 YML_ENTRY_RE = re.compile(r'^\s*([^:#\s]+)\s*:\s*(?:\d+\s*)?\s*"(.*)"\s*$')
+_loc_cache: dict[str, tuple[float, dict[str, str]]] = {}
 
 
 def append_localisation(path: Path, entries: dict[str, str]) -> None:
@@ -20,7 +21,7 @@ def append_localisation(path: Path, entries: dict[str, str]) -> None:
     raw = path.read_bytes()
     try:
         txt = raw.decode("utf-8-sig")
-    except Exception:
+    except UnicodeDecodeError:
         txt = raw.decode("utf-8", errors="ignore")
     if not txt.strip().startswith("l_english:"):
         txt = "l_english:\n" + txt
@@ -52,7 +53,7 @@ def delete_localisation_keys(path: Path, keys_to_delete: set[str]) -> None:
     raw = path.read_bytes()
     try:
         txt = raw.decode("utf-8-sig")
-    except Exception:
+    except UnicodeDecodeError:
         txt = raw.decode("utf-8", errors="ignore")
     if not txt.strip().startswith("l_english:"):
         txt = "l_english:\n" + txt
@@ -71,23 +72,22 @@ def delete_localisation_keys(path: Path, keys_to_delete: set[str]) -> None:
 
 
 def parse_english_localisation(loc_english_dir: Path) -> dict[str, str]:
-    """
-    Parse English localisation files in a directory.
-
-    Args:
-        loc_english_dir: Directory containing localisation files
-
-    Returns:
-        Dictionary mapping localisation keys to values
-    """
-    out: dict[str, str] = {}
     if not loc_english_dir.exists():
-        return out
+        return {}
+    try:
+        dir_mtime = loc_english_dir.stat().st_mtime
+    except OSError:
+        return {}
+    cache_key = str(loc_english_dir)
+    cached = _loc_cache.get(cache_key)
+    if cached is not None and cached[0] == dir_mtime:
+        return dict(cached[1])
+    out: dict[str, str] = {}
     for f in loc_english_dir.rglob("*.yml"):
         raw = f.read_bytes()
         try:
             txt = raw.decode("utf-8-sig")
-        except Exception:
+        except UnicodeDecodeError:
             txt = raw.decode("utf-8", errors="ignore")
         for line in txt.splitlines():
             if not line or line.strip().startswith("#"):
@@ -97,4 +97,5 @@ def parse_english_localisation(loc_english_dir: Path) -> dict[str, str]:
             m = YML_ENTRY_RE.match(line)
             if m:
                 out[m.group(1)] = m.group(2).replace("\\n", "\n")
+    _loc_cache[cache_key] = (dir_mtime, dict(out))
     return out

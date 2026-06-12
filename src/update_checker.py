@@ -88,7 +88,7 @@ def _version_greater(a: str, b: str) -> bool:
             pb.append(0)
         return pa > pb
     except (ValueError, AttributeError):
-        return a != b  # fallback: string compare
+        return False
 
 
 def start_update_check(parent: QObject, on_result) -> None:

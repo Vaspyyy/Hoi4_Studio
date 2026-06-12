@@ -53,7 +53,7 @@ def generate_provinces(
             density_weights[int(idx)] = 1.0
         else:
             terr_mask = territory_pmap == idx
-            mean_val = density_arr[terr_mask].mean()
+            mean_val = density_arr[terr_mask].mean() if density_arr is not None else 128.0
             density_weights[int(idx)] = (256.0 - mean_val) ** density_strength
 
     land_alloc = _distribute(land_terrs, land_count, pixel_counts, density_weights)
@@ -209,7 +209,7 @@ def _distribute(
 
     if density_weights is not None:
         terr_pixels = [
-            px * density_weights.get(d["_pmap_index"], 1.0)
+            int(px * density_weights.get(d["_pmap_index"], 1.0))
             for px, d in zip(terr_pixels, territories)
         ]
 

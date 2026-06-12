@@ -11,13 +11,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
-from PySide6.QtCore import QEvent, QObject, QTimer, Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -26,8 +25,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSlider,
-    QSpinBox,
     QStatusBar,
     QTextEdit,
     QVBoxLayout,
@@ -51,7 +48,7 @@ from .theme import (
     make_icon,
 )
 from .version import VERSION
-from .widgets import LogPanel
+from .widgets import BlockScrollFilter as _NoScrollFilter, LogPanel
 
 logger = logging.getLogger("hoi4_studio.main")
 
@@ -86,6 +83,7 @@ class _ScrollableTabWrapper(QWidget):
 class MainWindow(QMainWindow):
     paths_changed = Signal()
     tags_changed = Signal()
+    theme_changed = Signal(object)
 
     # (display name, factory callable, icon color key)
     # Eager tabs are built immediately; lazy tabs (factory != None) are
@@ -98,7 +96,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("HOI4 Modding Studio")
         logger.info("Initializing MainWindow")
         if getattr(sys, "frozen", False):
-            icon_path = Path(sys._MEIPASS) / "assets" / "logo.png"
+            icon_path = Path(sys._MEIPASS) / "assets" / "logo.png"  # type: ignore[attr-defined]
         else:
             icon_path = Path(__file__).parent.parent / "assets" / "logo.png"
         if icon_path.exists():
@@ -112,7 +110,7 @@ class MainWindow(QMainWindow):
             self.settings.window_width,
             self.settings.window_height,
         )
-        self.paths: Optional[HOI4Paths] = None
+        self.paths: HOI4Paths | None = None
         self._changes: list[str] = []
         self.resize(self.settings.window_width, self.settings.window_height)
 
@@ -194,17 +192,17 @@ class MainWindow(QMainWindow):
         tab_defs = [
             (self.welcome, None, "Welcome"),
             (self.project, None, "Project"),
-            (_make_country, "Nation Designer"),
-            (_make_ideology, "Ideologies"),
-            (_make_focus, "Focus Trees"),
-            (_make_ideas, "National Spirits"),
-            (_make_events, "Event Chains"),
-            (_make_localization, "Localisation"),
-            (_make_states, "State Browser"),
-            (_make_state_props, "State Properties"),
-            (_make_world_map, "Province Map"),
-            (_make_map_gen, "Map Generator"),
-            (_make_bookmark, "Bookmark Maker"),
+            (_make_country, _make_country, "Nation Designer"),
+            (_make_ideology, _make_ideology, "Ideologies"),
+            (_make_focus, _make_focus, "Focus Trees"),
+            (_make_ideas, _make_ideas, "National Spirits"),
+            (_make_events, _make_events, "Event Chains"),
+            (_make_localization, _make_localization, "Localisation"),
+            (_make_states, _make_states, "State Browser"),
+            (_make_state_props, _make_state_props, "State Properties"),
+            (_make_world_map, _make_world_map, "Province Map"),
+            (_make_map_gen, _make_map_gen, "Map Generator"),
+            (_make_bookmark, _make_bookmark, "Bookmark Maker"),
         ]
 
         self._tab_defs = tab_defs
@@ -214,11 +212,7 @@ class MainWindow(QMainWindow):
         self._tab_factories: dict[str, Callable[[], QWidget]] = {}
 
         for entry in tab_defs:
-            if len(entry) == 3:
-                widget_or_factory, factory, name = entry
-            else:
-                widget_or_factory, name = entry
-                factory = widget_or_factory
+            widget_or_factory, factory, name = entry[0], entry[1], str(entry[2])
 
             icon_color = TAB_ICONS.get(name, "#b8963e")
             icon = make_icon(icon_color)
@@ -249,6 +243,7 @@ class MainWindow(QMainWindow):
 
         self._setup_menus()
         self._setup_autosave()
+        self.theme_changed.connect(self._propagate_theme_to_buttons)
         self._apply_current_theme()
         self._start_update_check()
         logger.info("MainWindow ready: %d tabs", self.tabs.count())
@@ -337,12 +332,9 @@ class MainWindow(QMainWindow):
 
         # Ctrl+1..Ctrl+9 → jump to tab by index (first 9 tabs only)
         for i, entry in enumerate(self._tab_defs[:9]):
-            if len(entry) == 3:
-                name = entry[2]
-            else:
-                name = entry[1]
+            name = entry[2]
             jump = QAction(f"Switch to {name}", self)
-            jump.setShortcut(QKeySequence(f"Ctrl+{i+1}"))
+            jump.setShortcut(QKeySequence(f"Ctrl+{i + 1}"))
             idx = i
             jump.triggered.connect(lambda checked, i=idx: self.tabs.setCurrentIndex(i))
             self.addAction(jump)
@@ -409,12 +401,9 @@ class MainWindow(QMainWindow):
         self.log_panel.setStyleSheet(
             f"background: {colors.bg_secondary}; border-top: 1px solid {colors.border};"
         )
-        self._propagate_theme_to_buttons(colors)
+        self.theme_changed.emit(colors)
 
     def _propagate_theme_to_buttons(self, colors) -> None:
-        # TODO: full widget tree recursion on every theme switch causes lag
-        # on 10+ tabs ; use a signal-based approach instead. Each tab should
-        # connect to a theme_changed signal and update itself independently.
         for i in range(self.tabs.count()):
             widget = self.tabs.widget(i)
             inner = widget.inner_widget() if isinstance(widget, _ScrollableTabWrapper) else widget
@@ -493,8 +482,6 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _show_unsaved_dialog(self) -> str:
-        from .theme import get_colors
-
         colors = get_colors(self.settings.theme)
         dlg = QDialog(self)
         dlg.setWindowTitle("Unsaved Changes")
@@ -558,15 +545,6 @@ class MainWindow(QMainWindow):
         return result
 
 
-class _NoScrollFilter(QObject):
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Wheel and isinstance(obj, (QComboBox, QSpinBox, QSlider)):
-            if not obj.hasFocus():
-                event.ignore()
-                return True
-        return False
-
-
 def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
     """Show a crash dialog with Send Bug Report and Open Log File buttons.
 
@@ -603,7 +581,7 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
             QVBoxLayout,
         )
     except ImportError:
-        _print_crash_fallback(error_msg, log_file)
+        print(f"FATAL: {error_msg}", file=sys.stderr)
         return
 
     app = QApplication.instance()
@@ -611,11 +589,10 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
         try:
             app = QApplication([])
         except Exception:
-            _print_crash_fallback(error_msg, log_file)
+            print(f"FATAL: {error_msg}", file=sys.stderr)
             return
 
     try:
-
         dlg = QDialog()
         dlg.setWindowTitle("Something broke")
         dlg.setMinimumSize(560, 420)
@@ -698,18 +675,18 @@ def _show_crash_dialog(error_msg: str, log_file: Path | None) -> None:
         )
         dlg.exec()
     except Exception:
-        _print_crash_fallback(error_msg, log_file)
+        print(f"FATAL: {error_msg}", file=sys.stderr)
 
 
 def main():
-    logger = None
+    app_logger = None
     log_file = None
     try:
         from .logging_setup import get_log_file, setup_logging
 
-        logger = setup_logging(APP_DIR)
+        app_logger = setup_logging(APP_DIR)
         log_file = get_log_file()
-        logger.info("Application starting")
+        app_logger.info("Application starting")
 
         app = QApplication([])
 
@@ -721,15 +698,15 @@ def main():
         w.tabs.setCurrentIndex(0)
 
         w.show()
-        logger.info("Main window shown, entering event loop")
+        app_logger.info("Main window shown, entering event loop")
         app.exec()
     except Exception as e:
         import traceback
 
         tb = traceback.format_exc()
         try:
-            if logger:
-                logger.critical("Startup failed:\n%s", tb)
+            if app_logger:
+                app_logger.critical("Startup failed:\n%s", tb)
         except Exception:
             pass
         _show_crash_dialog(f"{e}\n\n{tb}", log_file)

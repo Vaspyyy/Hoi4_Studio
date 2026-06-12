@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -13,27 +14,50 @@ from .parser import parse_pdx, serialize_pdx, PdxNode
 
 
 _state_file_cache: dict[str, Optional[Path]] = {}
+_state_file_cache_lock = threading.Lock()
+_dir_index_cache: dict[Path, dict[str, Path]] = {}
+_dir_index_lock = threading.Lock()
 
 
 def _clear_state_file_cache() -> None:
-    _state_file_cache.clear()
+    with _state_file_cache_lock:
+        _state_file_cache.clear()
+    with _dir_index_lock:
+        _dir_index_cache.clear()
+
+
+def _get_dir_index(dir_path: Path) -> dict[str, Path]:
+    with _dir_index_lock:
+        if dir_path in _dir_index_cache:
+            return _dir_index_cache[dir_path]
+    index: dict[str, Path] = {}
+    for f in dir_path.glob("*.txt"):
+        txt = f.read_text(encoding="utf-8", errors="ignore")
+        for m in re.finditer(r"\bid\s*=\s*(\d+)\b", txt):
+            sid = m.group(1)
+            if sid not in index:
+                index[sid] = f
+    with _dir_index_lock:
+        _dir_index_cache[dir_path] = index
+    return index
 
 
 def find_state_file_in_dir(dir_path: Path, state_id: int) -> Optional[Path]:
     cache_key = f"{dir_path}:{state_id}"
-    if cache_key in _state_file_cache:
-        return _state_file_cache[cache_key]
+    with _state_file_cache_lock:
+        if cache_key in _state_file_cache:
+            return _state_file_cache[cache_key]
     for f in dir_path.glob("*.txt"):
         if f.name.startswith(f"{state_id} "):
-            _state_file_cache[cache_key] = f
+            with _state_file_cache_lock:
+                _state_file_cache[cache_key] = f
             return f
-    for f in dir_path.glob("*.txt"):
-        txt = f.read_text(encoding="utf-8", errors="ignore")
-        if re.search(rf"\bid\s*=\s*{state_id}\b", txt):
-            _state_file_cache[cache_key] = f
-            return f
-    _state_file_cache[cache_key] = None
-    return None
+    index = _get_dir_index(dir_path)
+    sid_str = str(state_id)
+    result = index.get(sid_str)
+    with _state_file_cache_lock:
+        _state_file_cache[cache_key] = result
+    return result
 
 
 def ensure_state_in_mod(mod_root: Path, hoi4_install: Path, state_id: int) -> Optional[Path]:
@@ -95,6 +119,7 @@ def apply_single_state(
 ) -> dict:
     state_dir = mod_root / "history/states"
     state_dir.mkdir(parents=True, exist_ok=True)
+    _clear_state_file_cache()
     f = find_state_file_in_dir(state_dir, state_id)
     if not f:
         f = ensure_state_in_mod(mod_root, hoi4_install, state_id) if hoi4_install else None

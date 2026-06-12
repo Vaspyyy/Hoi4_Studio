@@ -40,7 +40,7 @@ def _rasterize_svg(svg_path: Path) -> Image.Image:
         bin_name = "magick" if shutil.which("magick") else "convert"
         cmd = [bin_name, str(svg_path), str(tmp_path)]
         subprocess.run(cmd, check=True, capture_output=True, timeout=30)
-        return Image.open(tmp_path)
+        return Image.open(tmp_path).copy()
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -53,8 +53,7 @@ def nuclear_delete_mod(
     # Require the target to reside inside the user mods directory, or be deep
     # enough in the filesystem that it can't be a system-critical location.
     if not (
-        mod_root_resolved.is_relative_to(user_mods_resolved)
-        or len(mod_root_resolved.parts) >= 5
+        mod_root_resolved.is_relative_to(user_mods_resolved) or len(mod_root_resolved.parts) >= 5
     ):
         raise ValueError(f"Refusing to delete suspicious path: {mod_root_resolved}")
     if mod_root_resolved.exists():
@@ -83,7 +82,7 @@ def import_flag_to_mod(
             }
             for out, size in sizes.items():
                 out.parent.mkdir(parents=True, exist_ok=True)
-                rgba.resize(size, Image.LANCZOS).save(out, format="TGA")
+                rgba.resize(size, Image.LANCZOS).save(out, format="TGA")  # type: ignore[attr-defined]
 
 
 def _have_magick() -> bool:
@@ -104,7 +103,7 @@ def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: 
     png = out_dir / f"{name_slug}.png"
     dds = out_dir / f"{name_slug}.dds"
     with _open_image(src_image) as img:
-        rgba = img.convert("RGBA").resize(size, Image.LANCZOS)
+        rgba = img.convert("RGBA").resize(size, Image.LANCZOS)  # type: ignore[attr-defined]
     rgba.save(png, format="PNG")
     if not _have_magick():
         raise RuntimeError(
@@ -121,10 +120,11 @@ def import_portrait_to_mod(mod_root: Path, tag: str, name_slug: str, src_image: 
     )
     if result.returncode != 0:
         stderr_tail = result.stderr.strip()[-500:] if result.stderr else "(no stderr)"
-        raise RuntimeError(
-            f"DDS conversion failed (rc={result.returncode}): {stderr_tail}"
-        )
+        raise RuntimeError(f"DDS conversion failed (rc={result.returncode}): {stderr_tail}")
     if not dds.exists():
-        raise RuntimeError("DDS conversion failed ; check that ImageMagick is installed and on PATH")
+        raise RuntimeError(
+            "DDS conversion failed ; check that ImageMagick is installed and on PATH"
+        )
+    png.unlink(missing_ok=True)
     logger.info("Portrait exported: %s", dds)
     return dds

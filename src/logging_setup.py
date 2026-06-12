@@ -30,14 +30,14 @@ def setup_logging(app_dir: Path) -> logging.Logger:
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
-    fh = RotatingFileHandler(
-        str(_log_file), maxBytes=1_000_000, backupCount=3, encoding="utf-8"
-    )
+    fh = RotatingFileHandler(str(_log_file), maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    ))
+    fh.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
     root.addHandler(fh)
 
     logger = logging.getLogger("hoi4_studio")
@@ -48,11 +48,13 @@ def setup_logging(app_dir: Path) -> logging.Logger:
         logger.info("Frozen (PyInstaller), MEIPASS=%s", getattr(sys, "_MEIPASS", "?"))
     try:
         import PySide6
+
         logger.info("PySide6: %s", PySide6.__version__)
     except Exception:
         logger.info("PySide6: unknown")
     try:
         from .utils import _have_magick
+
         magick_ok = _have_magick()
         logger.info("ImageMagick: %s", "found" if magick_ok else "NOT FOUND")
     except Exception:
@@ -91,11 +93,13 @@ def build_crash_report(error_msg: str) -> str:
     ]
     try:
         import PySide6
+
         parts.append(f"  PySide6: {PySide6.__version__}")
     except Exception:
         pass
     try:
         from .utils import _have_magick
+
         parts.append(f"  ImageMagick: {'found' if _have_magick() else 'NOT FOUND'}")
     except Exception:
         pass

@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
 from ..theme import AnimatedButton, create_card_widget, create_section_title
 from ..ideas import read_all_ideas, write_idea_assignments, write_ideas_file
 from ..modifiers_catalog import ALL_MODIFIERS, MODIFIER_CATEGORIES
-from ..commands import GenericCommand
 
 if TYPE_CHECKING:
     from ..main import MainWindow
@@ -62,7 +61,9 @@ class IdeasTab(QWidget):
 
         self.cb_vanilla = QCheckBox("Include Common Ideas")
         self.cb_vanilla.setChecked(True)
-        self.cb_vanilla.setToolTip("Uncheck to only show ideas saved via this tab. For total conversion mods.")
+        self.cb_vanilla.setToolTip(
+            "Uncheck to only show ideas saved via this tab. For total conversion mods."
+        )
         picker_row.addWidget(self.cb_vanilla)
         picker_row.addStretch()
         layout.addLayout(picker_row)
@@ -71,15 +72,21 @@ class IdeasTab(QWidget):
         form = QFormLayout()
 
         self.idea_id = QLineEdit("new_idea")
-        self.idea_id.setToolTip("Unique identifier for this spirit. Used in events: add_ideas = new_idea")
+        self.idea_id.setToolTip(
+            "Unique identifier for this spirit. Used in events: add_ideas = new_idea"
+        )
         form.addRow("Idea ID", self.idea_id)
 
         self.idea_name = QLineEdit("New Idea")
-        self.idea_name.setToolTip("The localisation key for the idea's displayed name, e.g. new_idea_name")
+        self.idea_name.setToolTip(
+            "The localisation key for the idea's displayed name, e.g. new_idea_name"
+        )
         form.addRow("Name Key", self.idea_name)
 
         self.idea_desc = QLineEdit("")
-        self.idea_desc.setToolTip("Description text shown in the idea tooltip — auto-saved to localisation")
+        self.idea_desc.setToolTip(
+            "Description text shown in the idea tooltip — auto-saved to localisation"
+        )
         form.addRow("Description", self.idea_desc)
 
         self.idea_pic = QLineEdit("GFX_idea_generic")
@@ -89,12 +96,16 @@ class IdeasTab(QWidget):
         self.removal_cost = QSpinBox()
         self.removal_cost.setRange(-1, 9999)
         self.removal_cost.setValue(-1)
-        self.removal_cost.setToolTip("Political power cost to remove. Set to -1 = cannot be removed.")
+        self.removal_cost.setToolTip(
+            "Political power cost to remove. Set to -1 = cannot be removed."
+        )
         form.addRow("Removal Cost", self.removal_cost)
 
         self.allowed_text = QTextEdit()
         self.allowed_text.setMaximumHeight(60)
-        self.allowed_text.setToolTip("Conditions the country must meet for this spirit to appear. E.g.:\ntag = GER\nhas_war = yes")
+        self.allowed_text.setToolTip(
+            "Conditions the country must meet for this spirit to appear. E.g.:\ntag = GER\nhas_war = yes"
+        )
         self.allowed_text.setPlaceholderText("e.g. tag = GER")
         form.addRow("Allowed", self.allowed_text)
 
@@ -165,7 +176,9 @@ class IdeasTab(QWidget):
         # ── Bottom buttons ──────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_add_update = AnimatedButton("Add / Update")
-        btn_add_update.setToolTip("Add a new idea or update the selected one with the current form values")
+        btn_add_update.setToolTip(
+            "Add a new idea or update the selected one with the current form values"
+        )
         btn_add_update.clicked.connect(self._add_or_update)
         btn_row.addWidget(btn_add_update)
 
@@ -210,6 +223,7 @@ class IdeasTab(QWidget):
         self.tag_picker.clear()
         self.tag_picker.addItem("(none)")
         from ..tags import load_all_tags
+
         for t in load_all_tags(hoi4, mod):
             self.tag_picker.addItem(t)
         self.tag_picker.setCurrentIndex(1)  # skip "(none)"
@@ -248,7 +262,9 @@ class IdeasTab(QWidget):
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, idea)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if idea.get("assigned") else Qt.CheckState.Unchecked)
+            item.setCheckState(
+                Qt.CheckState.Checked if idea.get("assigned") else Qt.CheckState.Unchecked
+            )
             self.idea_list.addItem(item)
         self.idea_list.blockSignals(False)
 

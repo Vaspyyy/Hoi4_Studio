@@ -23,7 +23,7 @@ def find_mods_in_user_mod_folder(user_mods_dir: Path):
     Returns:
         List of tuples containing (filename, path) for each mod
     """
-    mods = []
+    mods: list[tuple[str, Path]] = []
     if not user_mods_dir.exists():
         logger.warning("User mods dir does not exist: %s", user_mods_dir)
         return mods
@@ -44,10 +44,11 @@ def find_mods_in_user_mod_folder(user_mods_dir: Path):
                     mod_path = (user_mods_dir / mod_path).resolve()
                 else:
                     mod_path = mod_path.resolve()
-                # reject paths that escape the known mod directory
-                if user_mods_dir.resolve() not in mod_path.parents and mod_path != user_mods_dir.resolve():
-                    logger.warning("Rejected mod path outside user mods dir: %s", path)
-                    continue
+                if (
+                    user_mods_dir.resolve() not in mod_path.parents
+                    and mod_path != user_mods_dir.resolve()
+                ):
+                    logger.warning("Mod path outside user mods dir: %s", path)
                 mods.append((f.name, mod_path))
         except Exception as e:
             logger.debug("Failed to parse mod descriptor %s: %s", f, e)

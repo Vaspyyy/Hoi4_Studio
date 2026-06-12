@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QFileDialog,
     QInputDialog,
     QMessageBox,
     QComboBox,
@@ -57,7 +58,9 @@ class ProjectTab(QWidget):
             # on-disk path is English, so this tooltip is correct for modern Windows.
             "Path to the Paradox user mods folder (Linux: ~/.local/share/Paradox Interactive/Hearts of Iron IV/mod, Windows: Documents\\Paradox Interactive\\Hearts of Iron IV\\mod)",
         )
-        r3, self.mod_root, b3 = row("Mod Root", "Where your mod lives. The folder with common/, history/, etc.")
+        r3, self.mod_root, b3 = row(
+            "Mod Root", "Where your mod lives. The folder with common/, history/, etc."
+        )
 
         b1.clicked.connect(lambda: self.pick_dir(self.hoi4_install))
         b2.clicked.connect(lambda: self.pick_dir(self.user_mods))
@@ -71,12 +74,12 @@ class ProjectTab(QWidget):
         btn_apply.setToolTip("Point the tool at these paths and get to work")
         btn_apply.clicked.connect(lambda: self.apply_paths(create_if_missing=False))
         btn_create_load = AnimatedButton("Create and Load")
-        btn_create_load.setToolTip(
-            "Make the mod folder if it doesn't exist yet, then load it"
-        )
+        btn_create_load.setToolTip("Make the mod folder if it doesn't exist yet, then load it")
         btn_create_load.clicked.connect(lambda: self.apply_paths(create_if_missing=True))
         btn_struct = AnimatedButton("Scaffold Folders")
-        btn_struct.setToolTip("Create the standard mod folder layout: common/, history/, localisation/")
+        btn_struct.setToolTip(
+            "Create the standard mod folder layout: common/, history/, localisation/"
+        )
         btn_struct.clicked.connect(self.create_structure)
         btn_desc = AnimatedButton("Generate .mod File")
         btn_desc.setToolTip("Write the .mod descriptor that Paradox launcher needs")
@@ -139,9 +142,7 @@ class ProjectTab(QWidget):
             if loc_path.exists():
                 self.loc_dir.setText(str(loc_path))
             else:
-                QMessageBox.warning(
-                    self, "Warning", f"No localisation folder at {loc_path}"
-                )
+                QMessageBox.warning(self, "Warning", f"No localisation folder at {loc_path}")
 
     def apply_paths(self, create_if_missing: bool = False):
         try:
@@ -157,9 +158,7 @@ class ProjectTab(QWidget):
                     mod.mkdir(parents=True, exist_ok=True)
                     self.mw.log_panel.log(f"Created mod folder: {mod}", "info")
                 else:
-                    raise ValueError(
-                        "Mod folder doesn't exist. Hit 'Create and Load' to make it."
-                    )
+                    raise ValueError("Mod folder doesn't exist. Hit 'Create and Load' to make it.")
 
             loc_path = hoi4 / "localisation/english"
             if loc_path.exists():
@@ -194,7 +193,9 @@ class ProjectTab(QWidget):
                     if user.exists() and hoi4.exists():
                         self.mw.paths = HOI4Paths(hoi4, user, mod)
             if not self.mw.paths:
-                QMessageBox.critical(self, "Error", "Load a mod first. Point me at the paths above.")
+                QMessageBox.critical(
+                    self, "Error", "Load a mod first. Point me at the paths above."
+                )
                 return
         create_mod_structure(self.mw.paths)
         self.mw.log_panel.log("Mod folder layout created.", "success")
@@ -240,7 +241,7 @@ class ProjectTab(QWidget):
         confirm, ok = QInputDialog.getText(
             self,
             "Confirm Delete",
-            'Type DELETE (all caps) to permanently erase this mod:',
+            "Type DELETE (all caps) to permanently erase this mod:",
             QLineEdit.EchoMode.Normal,
         )
         if not ok or confirm.strip() != "DELETE":

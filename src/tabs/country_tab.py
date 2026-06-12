@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -39,7 +39,7 @@ from ..countries import (
     write_character_file,
 )
 from ..utils import import_flag_to_mod, import_portrait_to_mod
-from ..widgets import ColorSwatch, IdeologySlider, ValidationMixin
+from ..widgets import BlockScrollFilter, ColorSwatch, IdeologySlider, ValidationMixin
 
 if TYPE_CHECKING:
     from ..main import MainWindow
@@ -56,13 +56,7 @@ POP_ENTRY_RE = re.compile(r"(\w+)\s*=\s*(\d+)")
 
 
 def _disable_scroll(widget: QWidget) -> None:
-    class _Blocker(QObject):
-        def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-            if event.type() == QEvent.Type.Wheel:
-                return True
-            return super().eventFilter(obj, event)
-
-    widget.installEventFilter(_Blocker(widget))
+    widget.installEventFilter(BlockScrollFilter(widget))
 
 
 def _read_country_definition(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> dict:
@@ -138,7 +132,9 @@ def _read_country_history(mod_root: Path, tag: str, hoi4_install: Optional[Path]
 
 
 def _read_country_localisation(
-    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None,
+    mod_root: Path,
+    tag: str,
+    hoi4_install: Optional[Path] = None,
 ) -> dict:
     for base in [mod_root, hoi4_install]:
         if base is None:
@@ -166,46 +162,49 @@ def _read_country_localisation(
     return {}
 
 
-def _read_character_ideology(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> str:
+def _search_character_file(
+    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None
+) -> str | None:
     for base in [mod_root, hoi4_install]:
         if base is None:
             continue
         for fname in [f"{tag}_characters.txt", f"{tag}.txt"]:
             p = base / f"common/characters/{fname}"
-            if not p.exists():
-                continue
-            txt = p.read_text(encoding="utf-8", errors="ignore")
-            m = IDEOLOGY_RE.search(txt)
-            if m:
-                return m.group(1)
+            if p.exists():
+                return p.read_text(encoding="utf-8", errors="ignore")
+    return None
+
+
+def _read_character_ideology(mod_root: Path, tag: str, hoi4_install: Optional[Path] = None) -> str:
+    txt = _search_character_file(mod_root, tag, hoi4_install)
+    if txt:
+        m = IDEOLOGY_RE.search(txt)
+        if m:
+            return m.group(1)
     return ""
 
 
 def _read_character_leader_name(
-    mod_root: Path, tag: str, hoi4_install: Optional[Path] = None,
+    mod_root: Path,
+    tag: str,
+    hoi4_install: Optional[Path] = None,
 ) -> str:
-    for base in [mod_root, hoi4_install]:
-        if base is None:
-            continue
-        for fname in [f"{tag}_characters.txt", f"{tag}.txt"]:
-            p = base / f"common/characters/{fname}"
-            if not p.exists():
-                continue
-            txt = p.read_text(encoding="utf-8", errors="ignore")
-            m = re.search(r'name\s*=\s*"([^"]*)"', txt)
-            if m:
-                return m.group(1)
+    txt = _search_character_file(mod_root, tag, hoi4_install)
+    if txt:
+        m = re.search(r'name\s*=\s*"([^"]*)"', txt)
+        if m:
+            return m.group(1)
     return ""
 
 
 class CountryTab(QWidget):
-
     def __init__(self, mw: "MainWindow"):
         super().__init__()
         self.mw = mw
         self._normalizing = False
         self._ideology_groups: dict[str, list[str]] = {}
         self._ideology_loc: dict[str, str] = {}
+        self._loc_cache: dict[str, dict] = {}
         outer = QVBoxLayout(self)
         card, layout = create_card_widget(self)
 
@@ -291,11 +290,18 @@ class CountryTab(QWidget):
         layout.addWidget(QLabel("Leader Sub-Ideology"))
         layout.addWidget(self.leader_ideology)
         _disable_scroll(self.leader_ideology)
+        self.leader_ideology.currentIndexChanged.connect(
+            lambda: self.leader_ideology.setToolTip(
+                self.leader_ideology.currentData(Qt.ItemDataRole.ToolTipRole) or ""
+            )
+        )
 
         layout.addWidget(QLabel("Flag"))
         rf = QHBoxLayout()
         self.flag = QLineEdit()
-        self.flag.setToolTip("Path to a flag image (PNG/JPG/SVG). Will be converted to TGA in 3 sizes.")
+        self.flag.setToolTip(
+            "Path to a flag image (PNG/JPG/SVG). Will be converted to TGA in 3 sizes."
+        )
         bf = AnimatedButton("Browse")
         bf.clicked.connect(lambda: self.pick_img(self.flag))
         rf.addWidget(self.flag)
@@ -333,8 +339,9 @@ class CountryTab(QWidget):
         tag = text.strip().upper()
         if not tag or tag == "(NONE)" or not self.mw.paths:
             return
-        vanilla = load_vanilla_tags(self.mw.paths.hoi4_install)
-        if tag in vanilla:
+        if not hasattr(self, "_vanilla_tags_cache"):
+            self._vanilla_tags_cache = load_vanilla_tags(self.mw.paths.hoi4_install)
+        if tag in self._vanilla_tags_cache:
             self.override_vanilla.setChecked(True)
 
     def _update_sub_ideologies(self, ruling_party: str) -> None:
@@ -353,11 +360,6 @@ class CountryTab(QWidget):
         self.leader_ideology.blockSignals(False)
         self.leader_ideology.setToolTip(
             self.leader_ideology.currentData(Qt.ItemDataRole.ToolTipRole) or ""
-        )
-        self.leader_ideology.currentIndexChanged.connect(
-            lambda: self.leader_ideology.setToolTip(
-                self.leader_ideology.currentData(Qt.ItemDataRole.ToolTipRole) or ""
-            )
         )
 
     def normalize(self, ideology: str = "", val: int = 0):
@@ -381,6 +383,7 @@ class CountryTab(QWidget):
         if source_val is not None:
             remaining = 100 - source_val
             if remaining < 0:
+                assert source is not None
                 source.setValue(100)
                 remaining = 0
             others_total = sum(s.value() for s in others)
@@ -415,7 +418,9 @@ class CountryTab(QWidget):
             self.color_swatch.set_color(r, g, b)
 
     def pick_img(self, le: QLineEdit):
-        f, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.png *.jpg *.jpeg *.svg)")
+        f, _ = QFileDialog.getOpenFileName(
+            self, "Select image", "", "Images (*.png *.jpg *.jpeg *.svg)"
+        )
         if f:
             le.setText(f)
 
@@ -519,7 +524,9 @@ class CountryTab(QWidget):
             sub_idx = self.leader_ideology.findText(char_ideology)
             if sub_idx >= 0:
                 self.leader_ideology.setCurrentIndex(sub_idx)
-        loc = _read_country_localisation(mod, tag, hoi4)
+        if tag not in self._loc_cache:
+            self._loc_cache[tag] = _read_country_localisation(mod, tag, hoi4)
+        loc = self._loc_cache[tag]
         if loc.get("name"):
             self.name.setText(loc["name"])
         if loc.get("adj"):

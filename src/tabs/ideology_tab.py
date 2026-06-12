@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -32,7 +31,6 @@ from ..ideologies import (
     IdeologyDef,
     SubIdeology,
     parse_ideologies,
-    resolve_sub_ideology_loc,
     write_ideologies,
 )
 from ..modifiers_catalog import ALL_MODIFIERS
@@ -206,7 +204,13 @@ class IdeologyTab(QWidget):
         layout.addLayout(split)
 
         # avoid spinbox scroll-while-editing
-        for sb in [self._ai_wanted_units, self._ai_core_threshold, self._war_tension, self._faction_tension, self._mod_val]:
+        for sb in [
+            self._ai_wanted_units,
+            self._ai_core_threshold,
+            self._war_tension,
+            self._faction_tension,
+            self._mod_val,
+        ]:
             sb.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._set_form_enabled(False)
@@ -241,7 +245,9 @@ class IdeologyTab(QWidget):
                 self._list.setCurrentItem(item)
         self._list.blockSignals(False)
 
-    def _on_select(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None = None) -> None:
+    def _on_select(
+        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None = None
+    ) -> None:
         if current is None:
             self._current_key = None
             self._set_form_enabled(False)
@@ -260,7 +266,9 @@ class IdeologyTab(QWidget):
         self._set_form_enabled(enabled)
         self._btn_delete.setEnabled(enabled)
         self._btn_delete.setToolTip(
-            "" if enabled else "Vanilla ideologies cannot be deleted. Save to create a mod override."
+            ""
+            if enabled
+            else "Vanilla ideologies cannot be deleted. Save to create a mod override."
         )
 
     def _populate_form(self, ideo: IdeologyDef) -> None:
@@ -394,8 +402,7 @@ class IdeologyTab(QWidget):
     # --- modifiers ---
 
     def _clear_modifier_table(self) -> None:
-        while self._mod_table.rowCount() > 0:
-            self._mod_table.removeRow(0)
+        self._mod_table.setRowCount(0)
 
     def _add_modifier_row(self, key: str, value: str) -> None:
         lbl = QLabel(key)
@@ -483,7 +490,8 @@ class IdeologyTab(QWidget):
         if ideo is None or ideo.is_vanilla:
             return
         r = QMessageBox.question(
-            self, "Delete",
+            self,
+            "Delete",
             f"Delete ideology '{self._current_key}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )

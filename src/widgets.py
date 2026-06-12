@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QBrush, QPen
 from PySide6.QtWidgets import (
     QWidget,
@@ -21,9 +21,19 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QComboBox,
+    QSpinBox,
 )
 
 from .theme import ThemeColors, DARK_COLORS, AnimatedButton
+
+
+class BlockScrollFilter(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Wheel and isinstance(obj, (QComboBox, QSpinBox, QSlider)):
+            if not obj.hasFocus():
+                event.ignore()
+                return True
+        return False
 
 
 class TagPickerWidget(QWidget):
@@ -81,7 +91,7 @@ class TagPickerWidget(QWidget):
             self.combo.addItem(t)
 
     def current_tag(self) -> str:
-        return self.tag_edit.text().strip().upper()
+        return str(self.tag_edit.text().strip().upper())
 
     def set_tag(self, tag: str) -> None:
         self.tag_edit.setText(tag)
@@ -144,7 +154,8 @@ def get_ideology_color(ideology: str, parsed: dict | None = None) -> str:
 
 def get_ideology_rgb(ideology: str, parsed: dict | None = None) -> tuple[int, int, int]:
     if parsed and ideology in parsed:
-        return parsed[ideology].color
+        color = parsed[ideology].color
+        return (int(color[0]), int(color[1]), int(color[2]))
     hex_color = IDEOLOGY_COLORS.get(ideology, "#b8963e")
     h = hex_color.lstrip("#")
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
@@ -196,7 +207,7 @@ class IdeologySlider(QWidget):
         self.value_changed.emit(self._ideology, val)
 
     def value(self) -> int:
-        return self._slider.value()
+        return int(self._slider.value())
 
     def setValue(self, v: int) -> None:
         self._slider.setValue(v)
@@ -341,7 +352,7 @@ class LabeledField(QWidget):
         layout.addWidget(self.line_edit)
 
     def text(self) -> str:
-        return self.line_edit.text()
+        return str(self.line_edit.text())
 
     def setText(self, t: str) -> None:
         self.line_edit.setText(t)

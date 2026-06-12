@@ -13,6 +13,7 @@ from typing import Optional
 
 TAG_LINE_RE = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*".*"\s*$')
 TAG_FILE_RE = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"(.+)"\s*$')
+_vanilla_tags_cache: dict[str, set[str]] = {}
 
 
 def _parse_tag_file_mapping(country_tags_dir: Path) -> dict[str, str]:
@@ -43,6 +44,9 @@ def resolve_country_filename(base: Path, tag: str) -> Optional[Path]:
 
 
 def load_vanilla_tags(hoi4_install: Path) -> set[str]:
+    key = str(hoi4_install)
+    if key in _vanilla_tags_cache:
+        return _vanilla_tags_cache[key].copy()
     p = hoi4_install / "common/country_tags/00_countries.txt"
     if not p.exists():
         return set()
@@ -52,7 +56,8 @@ def load_vanilla_tags(hoi4_install: Path) -> set[str]:
         m = TAG_LINE_RE.match(line)
         if m:
             tags.add(m.group(1))
-    return tags
+    _vanilla_tags_cache[key] = tags
+    return tags.copy()
 
 
 def load_mod_tags(mod_root: Path) -> list[str]:

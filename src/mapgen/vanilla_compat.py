@@ -59,7 +59,7 @@ def extract_all_vanilla_palettes(game_path: Path) -> dict[str, list[int]]:
     terrain = extract_vanilla_palette(game_path, "terrain.bmp")
     return {
         "terrainHoi4": terrain,
-        "citiesHoi4": terrain,   # Hoi4ImageExporter.cpp:27-28 ; cities = terrain.colourtable
+        "citiesHoi4": terrain,  # Hoi4ImageExporter.cpp:27-28 ; cities = terrain.colourtable
         "riversHoi4": extract_vanilla_palette(game_path, "rivers.bmp"),
         "treesHoi4": extract_vanilla_palette(game_path, "trees.bmp"),
         "heightmapHoi4": extract_vanilla_palette(game_path, "heightmap.bmp"),
@@ -108,16 +108,31 @@ def save_indexed_bmp(
 
 # terrain.bmp: terrain-type string → palette index
 COLOUR_MAP_TERRAIN: dict[str, int] = {
-    "grassland": 0,          "grasslandHills": 17,    "grasslandMountains": 20,
-    "desert": 3,             "desertHills": 8,        "desertMountains": 10,
-    "forest": 4,             "forestHills": 1,        "forestMountains": 4,
-    "savanna": 0,            "drysavanna": 12,
-    "jungle": 21,            "tundra": 19,            "ice": 2,
-    "marsh": 9,              "urban": 13,             "farm": 5,
-    "sea": 15,               "lake": 15,
-    "rockyHills": 2,         "snowyHills": 16,
-    "rockyMountains": 6,     "snowyMountains": 16,
-    "rockyPeaks": 11,        "snowyPeaks": 16,
+    "grassland": 0,
+    "grasslandHills": 17,
+    "grasslandMountains": 20,
+    "desert": 3,
+    "desertHills": 8,
+    "desertMountains": 10,
+    "forest": 4,
+    "forestHills": 1,
+    "forestMountains": 4,
+    "savanna": 0,
+    "drysavanna": 12,
+    "jungle": 21,
+    "tundra": 19,
+    "ice": 2,
+    "marsh": 9,
+    "urban": 13,
+    "farm": 5,
+    "sea": 15,
+    "lake": 15,
+    "rockyHills": 2,
+    "snowyHills": 16,
+    "rockyMountains": 6,
+    "snowyMountains": 16,
+    "rockyPeaks": 11,
+    "snowyPeaks": 16,
 }
 
 # (climate_class_id, elevation_mod) → palette index
@@ -125,62 +140,139 @@ COLOUR_MAP_TERRAIN: dict[str, int] = {
 # climate_class_id values as ints (ClimateClassId enum ordinals)
 INDEX_MAP_TERRAIN: dict[tuple[int, int], int] = {
     # TROPICSRAINFOREST
-    (0, 0): 21, (0, 100): 22, (0, 200): 27, (0, 300): 27,
+    (0, 0): 21,
+    (0, 100): 22,
+    (0, 200): 27,
+    (0, 300): 27,
     # TROPICSMONSOON
-    (1, 0): 22, (1, 100): 22, (1, 200): 27, (1, 300): 27,
+    (1, 0): 22,
+    (1, 100): 22,
+    (1, 200): 27,
+    (1, 300): 27,
     # TROPICSSAVANNA
-    (2, 0): 5,  (2, 100): 18, (2, 200): 18, (2, 300): 27,
+    (2, 0): 5,
+    (2, 100): 18,
+    (2, 200): 18,
+    (2, 300): 27,
     # DESERT
-    (3, 0): 7,  (3, 100): 10, (3, 200): 8,  (3, 300): 31,
+    (3, 0): 7,
+    (3, 100): 10,
+    (3, 200): 8,
+    (3, 300): 31,
     # COLDDESERT
-    (4, 0): 3,  (4, 100): 10, (4, 200): 8,  (4, 300): 16,
+    (4, 0): 3,
+    (4, 100): 10,
+    (4, 200): 8,
+    (4, 300): 16,
     # HOTSEMIARID
-    (5, 0): 0,  (5, 100): 20, (5, 200): 19, (5, 300): 11,
+    (5, 0): 0,
+    (5, 100): 20,
+    (5, 200): 19,
+    (5, 300): 11,
     # COLDSEMIARID
-    (6, 0): 0,  (6, 100): 18, (6, 200): 19, (6, 300): 16,
+    (6, 0): 0,
+    (6, 100): 18,
+    (6, 200): 19,
+    (6, 300): 16,
     # TEMPERATEHOT
-    (7, 0): 0,  (7, 100): 2,  (7, 200): 20, (7, 300): 16,
+    (7, 0): 0,
+    (7, 100): 2,
+    (7, 200): 20,
+    (7, 300): 16,
     # TEMPERATEWARM
-    (8, 0): 4,  (8, 100): 2,  (8, 200): 20, (8, 300): 16,
+    (8, 0): 4,
+    (8, 100): 2,
+    (8, 200): 20,
+    (8, 300): 16,
     # TEMPERATECOLD
-    (9, 0): 17, (9, 100): 2,  (9, 200): 16, (9, 300): 16,
+    (9, 0): 17,
+    (9, 100): 2,
+    (9, 200): 16,
+    (9, 300): 16,
     # CONTINENTALHOT
-    (10, 0): 1, (10, 100): 2, (10, 200): 20, (10, 300): 16,
+    (10, 0): 1,
+    (10, 100): 2,
+    (10, 200): 20,
+    (10, 300): 16,
     # CONTINENTALWARM
-    (11, 0): 4, (11, 100): 20, (11, 200): 11, (11, 300): 16,
+    (11, 0): 4,
+    (11, 100): 20,
+    (11, 200): 11,
+    (11, 300): 16,
     # CONTINENTALCOLD
-    (12, 0): 1, (12, 100): 2, (12, 200): 16, (12, 300): 16,
+    (12, 0): 1,
+    (12, 100): 2,
+    (12, 200): 16,
+    (12, 300): 16,
     # POLARTUNDRA
-    (13, 0): 9, (13, 100): 12, (13, 200): 16, (13, 300): 16,
+    (13, 0): 9,
+    (13, 100): 12,
+    (13, 200): 16,
+    (13, 300): 16,
     # POLARARCTIC
-    (14, 0): 0, (14, 100): 16, (14, 200): 16, (14, 300): 16,
+    (14, 0): 0,
+    (14, 100): 16,
+    (14, 200): 16,
+    (14, 300): 16,
     # SNOW
-    (15, 0): 16, (15, 100): 16, (15, 200): 16, (15, 300): 16,
+    (15, 0): 16,
+    (15, 100): 16,
+    (15, 200): 16,
+    (15, 300): 16,
     # WATER (ocean)
-    (16, 0): 15, (16, 100): 15, (16, 200): 15, (16, 300): 15,
+    (16, 0): 15,
+    (16, 100): 15,
+    (16, 200): 15,
+    (16, 300): 15,
 }
 
 # tree-terrain.bmp (overlay on terrain): forest-type → palette index
 INDEX_MAP_TREE_TERRAIN: dict[int, int] = {
-    0: 0,  1: 1,  2: 1,  3: 4,  4: 4,  5: 22,  6: 21,
+    0: 0,
+    1: 1,
+    2: 1,
+    3: 4,
+    4: 4,
+    5: 22,
+    6: 21,
 }
 
 # trees.bmp: forest-type → palette index
 INDEX_MAP_TREES: dict[int, int] = {
-    0: 0,  1: 6,  2: 6,  3: 5,  4: 3,  5: 28,  6: 29,
+    0: 0,
+    1: 6,
+    2: 6,
+    3: 5,
+    4: 3,
+    5: 28,
+    6: 29,
 }
 
 # trees.bmp: terrain-type string → palette index (land-use map for trees)
 COLOUR_MAP_TREES: dict[str, int] = {
-    "rockyHills": 5,         "snowyHills": 5,
-    "rockyMountains": 5,     "snowyMountains": 5,
-    "rockyPeaks": 5,         "snowyPeaks": 5,
-    "grassland": 5,          "grasslandHills": 6,     "grasslandMountains": 6,
-    "desert": 2,             "desertHills": 2,        "desertMountains": 2,
-    "forest": 6,             "forestHills": 6,        "forestMountains": 6,
-    "savanna": 3,            "drysavanna": 2,
-    "jungle": 28,            "tundra": 5,             "ice": 5,
-    "marsh": 5,              "urban": 5,              "farm": 5,
+    "rockyHills": 5,
+    "snowyHills": 5,
+    "rockyMountains": 5,
+    "snowyMountains": 5,
+    "rockyPeaks": 5,
+    "snowyPeaks": 5,
+    "grassland": 5,
+    "grasslandHills": 6,
+    "grasslandMountains": 6,
+    "desert": 2,
+    "desertHills": 2,
+    "desertMountains": 2,
+    "forest": 6,
+    "forestHills": 6,
+    "forestMountains": 6,
+    "savanna": 3,
+    "drysavanna": 2,
+    "jungle": 28,
+    "tundra": 5,
+    "ice": 5,
+    "marsh": 5,
+    "urban": 5,
+    "farm": 5,
     "sea": 0,
 }
 
@@ -188,9 +280,14 @@ COLOUR_MAP_TREES: dict[str, int] = {
 COLOUR_MAP_RIVERS: dict[str, int] = {
     "land": 255,
     "river": 3,
-    "river0.9": 3, "river0.8": 6, "river0.7": 6,
-    "river0.6": 10, "river0.5": 11, "river0.3": 11,
-    "river0.2": 11, "river0.1": 11,
+    "river0.9": 3,
+    "river0.8": 6,
+    "river0.7": 6,
+    "river0.6": 10,
+    "river0.5": 11,
+    "river0.3": 11,
+    "river0.2": 11,
+    "river0.1": 11,
     "sea": 254,
     "riverStart": 0,
     "riverStartTributary": 3,
@@ -349,7 +446,9 @@ color = {{ {colour_rgb} }}
 # Colors template  (== resources/hoi4/common/colors.txt)
 # ---------------------------------------------------------------------------
 
-COLORS_TEMPLATE = '{tag} = {{\n\tcolor = rgb {{ {r} {g} {b} }}\n\tcolor_ui = rgb {{ {r} {g} {b} }}\n}}\n'
+COLORS_TEMPLATE = (
+    "{tag} = {{\n\tcolor = rgb {{ {r} {g} {b} }}\n\tcolor_ui = rgb {{ {r} {g} {b} }}\n}}\n"
+)
 
 # ---------------------------------------------------------------------------
 # Bookmark template  (== resources/hoi4/common/bookmarks/the_gathering_storm.txt)
@@ -902,29 +1001,30 @@ def write_flat_dds(
     # DDSD_CAPS|DDSD_HEIGHT|DDSD_WIDTH|DDSD_PIXELFORMAT = 0x81007
     # DDPF_RGB|DDPF_ALPHAPIXELS = 0x41
     header = struct.pack(
-        "<4s I I I I I I I 44x"
-        " I I I I I I I I"
-        " I I I I I",
-        b"DDS ",       # magic
-        124,            # dwSize
-        0x81007,        # dwFlags
-        height,         # dwHeight
-        width,          # dwWidth
-        width * 4,      # dwPitchOrLinearSize
-        0,              # dwDepth
-        0,              # dwMipMapCount
+        "<4s I I I I I I I 44x I I I I I I I I I I I I I",
+        b"DDS ",  # magic
+        124,  # dwSize
+        0x81007,  # dwFlags
+        height,  # dwHeight
+        width,  # dwWidth
+        width * 4,  # dwPitchOrLinearSize
+        0,  # dwDepth
+        0,  # dwMipMapCount
         # ddspf
-        32,             # dwSize
-        0x41,           # dwFlags (RGB + Alpha)
-        0,              # dwFourCC (uncompressed)
-        32,             # dwRGBBitCount
-        0x000000FF,     # R mask
-        0x0000FF00,     # G mask
-        0x00FF0000,     # B mask
-        0xFF000000,     # A mask
+        32,  # dwSize
+        0x41,  # dwFlags (RGB + Alpha)
+        0,  # dwFourCC (uncompressed)
+        32,  # dwRGBBitCount
+        0x000000FF,  # R mask
+        0x0000FF00,  # G mask
+        0x00FF0000,  # B mask
+        0xFF000000,  # A mask
         # caps
-        0x1000,         # dwCaps (DDSCAPS_TEXTURE)
-        0, 0, 0, 0,    # Caps2-4, Reserved2
+        0x1000,  # dwCaps (DDSCAPS_TEXTURE)
+        0,
+        0,
+        0,
+        0,  # Caps2-4, Reserved2
     )
 
     # pixel data: bottom-to-top rows, RGBA

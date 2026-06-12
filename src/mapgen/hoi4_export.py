@@ -11,7 +11,6 @@ from __future__ import annotations
 import csv
 import json
 import logging
-import math
 import re
 import shutil
 from pathlib import Path
@@ -21,11 +20,9 @@ import numpy as np
 from PIL import Image
 
 from .vanilla_compat import (
-    COLOUR_MAP_CITIES,
     CONTINENT_TEMPLATE,
     DEFAULT_MAP,
     HOI4_MODULE_CONFIG,
-    REPLACE_PATHS,
     SEASONS_TXT,
     STATE_TEMPLATE,
     STRATEGIC_REGION_TEMPLATE,
@@ -61,6 +58,7 @@ _WEATHER_PERIODS = [
 # ---------------------------------------------------------------------------
 # utility
 # ---------------------------------------------------------------------------
+
 
 def _write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,7 +96,9 @@ def _copy_hoi4_base(mod_root: Path) -> None:
         return
     try:
         shutil.copytree(
-            base_dir, mod_root, dirs_exist_ok=True,
+            base_dir,
+            mod_root,
+            dirs_exist_ok=True,
             ignore=shutil.ignore_patterns("*.md", ".gitkeep", "descriptor*.mod", "colourMappings*"),
         )
         logger.info("Copied hoi4_base static files to %s", mod_root)
@@ -111,9 +111,11 @@ def _province_image_to_array(province_image: Image.Image) -> np.ndarray:
     rgb = province_image.convert("RGB")
     arr = np.array(rgb, dtype=np.uint32)
     # pack R,G,B into single uint32 for fast comparison
-    return (arr[:, :, 0].astype(np.uint32) << 16) | \
-           (arr[:, :, 1].astype(np.uint32) << 8) | \
-           arr[:, :, 2].astype(np.uint32)
+    return (
+        (arr[:, :, 0].astype(np.uint32) << 16)
+        | (arr[:, :, 1].astype(np.uint32) << 8)
+        | arr[:, :, 2].astype(np.uint32)
+    )
 
 
 def _pack_rgb(r: int, g: int, b: int) -> int:
@@ -131,6 +133,7 @@ def _bfs_path(
     if start == end:
         return [start]
     from collections import deque
+
     q = deque([(start, 0)])
     parent: dict[int, int] = {start: start}
     while q:
@@ -177,6 +180,7 @@ def _normalize_ids(meta: list[dict]) -> list[dict]:
 # adjacency computation
 # ---------------------------------------------------------------------------
 
+
 def compute_adjacencies(
     province_data: list[dict],
     province_image: Image.Image,
@@ -190,47 +194,30 @@ def compute_adjacencies(
     arr = _province_image_to_array(province_image)
     h, w = arr.shape
 
-    # build lookup: packed_rgb -> province_id
     color_to_id: dict[int, int] = {}
-    sea_ids: set[int] = set()
-    land_ids: set[int] = set()
     for d in province_data:
         key = _pack_rgb(d["R"], d["G"], d["B"])
         color_to_id[key] = d["province_id"]
-        if d.get("province_type") == "ocean":
-            sea_ids.add(d["province_id"])
-        else:
-            land_ids.add(d["province_id"])
+
+    unique_vals, inverse = np.unique(arr.ravel(), return_inverse=True)
+    id_lut = np.array([color_to_id.get(int(v), -1) for v in unique_vals], dtype=np.int64)
+    id_arr = id_lut[inverse].reshape(h, w)
 
     adj: set[tuple[int, int]] = set()
 
-    # check horizontal neighbors
-    for y in range(h):
-        row = arr[y]
-        row_next = arr[y + 1] if y + 1 < h else None
-        for x in range(w):
-            p1 = row[x]
-            pid1 = color_to_id.get(p1)
-            if pid1 is None:
-                continue
-            # right neighbor
-            if x + 1 < w:
-                p2 = row[x + 1]
-                if p2 != p1:
-                    pid2 = color_to_id.get(p2)
-                    if pid2 is not None:
-                        adj.add((min(pid1, pid2), max(pid1, pid2)))
-            # bottom neighbor
-            if row_next is not None:
-                p2 = row_next[x]
-                if p2 != p1:
-                    pid2 = color_to_id.get(p2)
-                    if pid2 is not None:
-                        adj.add((min(pid1, pid2), max(pid1, pid2)))
+    h_diff = id_arr[:, :-1] != id_arr[:, 1:]
+    h_valid = (id_arr[:, :-1] >= 0) & (id_arr[:, 1:] >= 0)
+    hy, hx = np.where(h_diff & h_valid)
+    for y, x in zip(hy, hx):
+        a, b = int(id_arr[y, x]), int(id_arr[y, x + 1])
+        adj.add((min(a, b), max(a, b)))
 
-    # add sea-to-sea adjacencies for naval movement
-    # any two sea provinces sharing a border
-    # (already captured above via pixel adjacency)
+    v_diff = id_arr[:-1, :] != id_arr[1:, :]
+    v_valid = (id_arr[:-1, :] >= 0) & (id_arr[1:, :] >= 0)
+    vy, vx = np.where(v_diff & v_valid)
+    for y, x in zip(vy, vx):
+        a, b = int(id_arr[y, x]), int(id_arr[y + 1, x])
+        adj.add((min(a, b), max(a, b)))
 
     return adj
 
@@ -250,21 +237,20 @@ def compute_coastal_provinces(
         color_to_id[key] = d["province_id"]
         color_to_type[key] = d.get("province_type", "land")
 
-    coastal: set[int] = set()
-    for y in range(h):
-        for x in range(w):
-            p_key = arr[y, x]
-            ptype = color_to_type.get(p_key, "land")
-            pid = color_to_id.get(p_key)
-            if pid is None or ptype == "ocean":
-                continue
-            # check 4 neighbors for any ocean pixel
-            for ny, nx in [(y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)]:
-                if 0 <= ny < h and 0 <= nx < w:
-                    n_key = arr[ny, nx]
-                    if n_key != p_key and color_to_type.get(n_key) == "ocean":
-                        coastal.add(pid)
-                        break
+    unique_vals, inverse = np.unique(arr.ravel(), return_inverse=True)
+    id_lut = np.array([color_to_id.get(int(v), -1) for v in unique_vals], dtype=np.int64)
+    type_lut = [color_to_type.get(int(v), "land") for v in unique_vals]
+    id_arr = id_lut[inverse].reshape(h, w)
+    type_arr = np.array(type_lut, dtype=object)[inverse].reshape(h, w)
+
+    ocean_mask = type_arr == "ocean"
+
+    from scipy.ndimage import binary_dilation
+
+    ocean_dilated = binary_dilation(ocean_mask, iterations=1)
+
+    coastal_mask = ocean_dilated & ~ocean_mask & (id_arr >= 0)
+    coastal: set[int] = set(int(x) for x in np.unique(id_arr[coastal_mask]) if x >= 0)
 
     return coastal
 
@@ -272,6 +258,7 @@ def compute_coastal_provinces(
 # ---------------------------------------------------------------------------
 # core HOI4 exports
 # ---------------------------------------------------------------------------
+
 
 def export_definition_csv(
     province_data: list[dict],
@@ -299,14 +286,18 @@ def export_definition_csv(
                 terrain = _terrain_map.get(ptype, "plains")
                 # RandomParadox: sea + lake provinces get continent 0
                 continent = 0 if ptype in ("ocean", "sea", "lake") else 1
-                w.writerow([
-                    pid,
-                    d["R"], d["G"], d["B"],
-                    _type_map.get(ptype, "land"),
-                    is_coastal,
-                    terrain,
-                    continent,
-                ])
+                w.writerow(
+                    [
+                        pid,
+                        d["R"],
+                        d["G"],
+                        d["B"],
+                        _type_map.get(ptype, "land"),
+                        is_coastal,
+                        terrain,
+                        continent,
+                    ]
+                )
     except OSError as e:
         logger.error("Failed to write definition.csv %s: %s", path, e)
 
@@ -335,7 +326,10 @@ def export_continent_txt(path: str | Path) -> None:
 
 def export_adjacency_rules_txt(path: str | Path) -> None:
     """Write adjacency_rules.txt - no canal/strait rules defined, game loads fine without them."""
-    _write_text(Path(path), "# No custom adjacency rules defined.\n# Adjacent provinces use default land movement.\n")
+    _write_text(
+        Path(path),
+        "# No custom adjacency rules defined.\n# Adjacent provinces use default land movement.\n",
+    )
 
 
 def export_seasons_txt(path: str | Path) -> None:
@@ -378,6 +372,7 @@ def export_ambient_object_txt(size: tuple[int, int], path: str | Path) -> None:
     are adjusted to match our map size.
     """
     from .vanilla_compat import AMBIENT_OBJECT_TEMPLATE
+
     w, h = size
     # vanilla HOI4 frame-border at 5632×2048: top=2190 (2048+142), logo=2130 (2048+82)
     content = AMBIENT_OBJECT_TEMPLATE.format(
@@ -530,10 +525,22 @@ def export_colors_txt(path: str | Path) -> None:
     default palette range.
     """
     colours = [
-        (86, 124, 27), (0, 86, 6), (112, 74, 31), (206, 169, 99),
-        (6, 200, 11), (255, 0, 24), (134, 84, 30), (252, 255, 0),
-        (73, 59, 15), (75, 147, 174), (174, 0, 255), (92, 83, 76),
-        (255, 0, 240), (240, 255, 0), (55, 90, 220), (8, 31, 130),
+        (86, 124, 27),
+        (0, 86, 6),
+        (112, 74, 31),
+        (206, 169, 99),
+        (6, 200, 11),
+        (255, 0, 24),
+        (134, 84, 30),
+        (252, 255, 0),
+        (73, 59, 15),
+        (75, 147, 174),
+        (174, 0, 255),
+        (92, 83, 76),
+        (255, 0, 240),
+        (240, 255, 0),
+        (55, 90, 220),
+        (8, 31, 130),
     ]
     lines = [f"color = {{ {r:>3}  {g:>3}  {b:>3} }}" for r, g, b in colours]
     _write_text(Path(path), "\n".join(lines) + "\n")
@@ -567,6 +574,7 @@ city_group = {
 # ---------------------------------------------------------------------------
 # terrain / bitmap exports
 # ---------------------------------------------------------------------------
+
 
 def export_terrain_bmp(
     size: tuple[int, int],
@@ -684,9 +692,21 @@ def export_world_normal_bmp(
             nz = np.full_like(nx, 255, dtype=np.uint8)
 
             # downsample to half resolution (simple block average)
-            nx_h = nx.reshape(half_h, h // half_h, half_w, w // half_w).mean(axis=(1, 3)).astype(np.uint8)
-            ny_h = ny.reshape(half_h, h // half_h, half_w, w // half_w).mean(axis=(1, 3)).astype(np.uint8)
-            nz_h = nz.reshape(half_h, h // half_h, half_w, w // half_w).mean(axis=(1, 3)).astype(np.uint8)
+            nx_h = (
+                nx.reshape(half_h, h // half_h, half_w, w // half_w)
+                .mean(axis=(1, 3))
+                .astype(np.uint8)
+            )
+            ny_h = (
+                ny.reshape(half_h, h // half_h, half_w, w // half_w)
+                .mean(axis=(1, 3))
+                .astype(np.uint8)
+            )
+            nz_h = (
+                nz.reshape(half_h, h // half_h, half_w, w // half_w)
+                .mean(axis=(1, 3))
+                .astype(np.uint8)
+            )
 
             rgb = np.stack([nx_h, ny_h, nz_h], axis=-1)
             img = Image.fromarray(rgb, mode="RGB")
@@ -701,6 +721,7 @@ def export_world_normal_bmp(
 # ---------------------------------------------------------------------------
 # adjacencies CSV
 # ---------------------------------------------------------------------------
+
 
 def export_adjacencies_csv(
     adjacencies: set[tuple[int, int]],
@@ -718,8 +739,20 @@ def export_adjacencies_csv(
     try:
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f, delimiter=";")
-            w.writerow(["From", "To", "Type", "Through", "start_x", "start_y",
-                         "stop_x", "stop_y", "adjacency_rule_name", "Comment"])
+            w.writerow(
+                [
+                    "From",
+                    "To",
+                    "Type",
+                    "Through",
+                    "start_x",
+                    "start_y",
+                    "stop_x",
+                    "stop_y",
+                    "adjacency_rule_name",
+                    "Comment",
+                ]
+            )
             # no data rows ; game auto-computes from provinces.bmp pixel borders
     except OSError as e:
         logger.error("Failed to write adjacencies.csv %s: %s", path, e)
@@ -728,6 +761,7 @@ def export_adjacencies_csv(
 # ---------------------------------------------------------------------------
 # strategic regions
 # ---------------------------------------------------------------------------
+
 
 def _weather_periods_block() -> str:
     """Return 12 period {{ }} blocks for a generic temperate region.
@@ -739,7 +773,7 @@ def _weather_periods_block() -> str:
     lines: list[str] = []
     for p in _WEATHER_PERIODS:
         btwn_s, btwn_s_end, tlo, thi = p[0], p[1], p[2], p[3]
-        lines.append(f"\t\tperiod={{")
+        lines.append("\t\tperiod={")
         lines.append(f"\t\t\tbetween={{ {btwn_s} {btwn_s_end} }}")
         lines.append(f"\t\t\ttemperature={{ {tlo:.1f} {thi:.1f} }}")
         lines.append(f"\t\t\tno_phenomenon={p[4]:.3f}")
@@ -751,7 +785,7 @@ def _weather_periods_block() -> str:
         lines.append(f"\t\t\tmud={p[10]:.3f}")
         lines.append(f"\t\t\tsandstorm={p[11]:.3f}")
         lines.append(f"\t\t\tmin_snow_level={p[12]:.3f}")
-        lines.append(f"\t\t}}")
+        lines.append("\t\t}")
     return "\n".join(lines)
 
 
@@ -806,6 +840,7 @@ def export_strategic_regions(
 # ---------------------------------------------------------------------------
 # supply areas
 # ---------------------------------------------------------------------------
+
 
 def export_supply_areas(
     territory_data: list[dict],
@@ -872,6 +907,7 @@ def export_supply_nodes(
 # buildings
 # ---------------------------------------------------------------------------
 
+
 def export_buildings_txt(
     province_data: list[dict],
     territory_data: list[dict],
@@ -932,6 +968,7 @@ def export_buildings_txt(
 # localisation placeholders
 # ---------------------------------------------------------------------------
 
+
 def export_localisation_placeholders(
     province_data: list[dict],
     territory_data: list[dict],
@@ -944,7 +981,7 @@ def export_localisation_placeholders(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    prov_lines = ['l_english:']
+    prov_lines = ["l_english:"]
     for d in province_data:
         pid = d["province_id"]
         prov_lines.append(f' PROV{pid}:0 "Province {pid}"')
@@ -958,7 +995,7 @@ def export_localisation_placeholders(
     except OSError as e:
         logger.error("Failed to write province localisation: %s", e)
 
-    strat_lines = ['l_english:']
+    strat_lines = ["l_english:"]
     for t in territory_data:
         tid = t["territory_id"]
         strat_lines.append(f' STRATEGICREGION_{tid}:0 "Region {tid}"')
@@ -969,7 +1006,7 @@ def export_localisation_placeholders(
     except OSError as e:
         logger.error("Failed to write strategic region localisation: %s", e)
 
-    supply_lines = ['l_english:']
+    supply_lines = ["l_english:"]
     for t in territory_data:
         tid = t["territory_id"]
         supply_lines.append(f' SUPPLYAREA_{tid}:0 "Supply Area {tid}"')
@@ -984,6 +1021,7 @@ def export_localisation_placeholders(
 # ---------------------------------------------------------------------------
 # master export: one call writes everything
 # ---------------------------------------------------------------------------
+
 
 def export_all_map_files(
     province_data: list[dict],
@@ -1058,28 +1096,25 @@ def export_all_map_files(
     results["adjacencies.csv"] = "ok"
 
     # terrain.bmp
-    export_terrain_bmp((w, h), map_dir / "terrain.bmp",
-                       palettes["terrainHoi4"] if palettes else [])
+    export_terrain_bmp((w, h), map_dir / "terrain.bmp", palettes["terrainHoi4"] if palettes else [])
     results["terrain.bmp"] = "ok"
 
     # rivers.bmp
-    export_rivers_bmp((w, h), map_dir / "rivers.bmp",
-                      palettes["riversHoi4"] if palettes else [])
+    export_rivers_bmp((w, h), map_dir / "rivers.bmp", palettes["riversHoi4"] if palettes else [])
     results["rivers.bmp"] = "ok"
 
     # heightmap.bmp
-    export_heightmap_bmp((w, h), map_dir / "heightmap.bmp",
-                         palettes["heightmapHoi4"] if palettes else [])
+    export_heightmap_bmp(
+        (w, h), map_dir / "heightmap.bmp", palettes["heightmapHoi4"] if palettes else []
+    )
     results["heightmap.bmp"] = "ok"
 
     # trees.bmp
-    export_trees_bmp((w, h), map_dir / "trees.bmp",
-                     palettes["treesHoi4"] if palettes else [])
+    export_trees_bmp((w, h), map_dir / "trees.bmp", palettes["treesHoi4"] if palettes else [])
     results["trees.bmp"] = "ok"
 
     # cities.bmp
-    export_cities_bmp((w, h), map_dir / "cities.bmp",
-                      palettes["citiesHoi4"] if palettes else [])
+    export_cities_bmp((w, h), map_dir / "cities.bmp", palettes["citiesHoi4"] if palettes else [])
     results["cities.bmp"] = "ok"
 
     # world_normal.bmp
@@ -1091,15 +1126,17 @@ def export_all_map_files(
     # and contain vanilla continents, causing wrong water rendering)
     terrain_dir = map_dir / "terrain"
     terrain_dir.mkdir(parents=True, exist_ok=True)
-    write_flat_dds(terrain_dir / "colormap_rgb_cityemissivemask_a.dds",
-                   w, h, r=127, g=140, b=80, a=255)
+    write_flat_dds(
+        terrain_dir / "colormap_rgb_cityemissivemask_a.dds", w, h, r=127, g=140, b=80, a=255
+    )
     results["terrain/colormap_rgb_cityemissivemask_a.dds"] = "ok"
 
     for level, factor in [(0, 1), (1, 2), (2, 4)]:
         ww = max(1, w // factor)
         hh = max(1, h // factor)
-        write_flat_dds(terrain_dir / f"colormap_water_{level}.dds",
-                       ww, hh, r=30, g=50, b=120, a=255)
+        write_flat_dds(
+            terrain_dir / f"colormap_water_{level}.dds", ww, hh, r=30, g=50, b=120, a=255
+        )
     results["terrain/colormap_water_*.dds"] = "3 water levels"
 
     # positions.txt
@@ -1123,8 +1160,7 @@ def export_all_map_files(
     results["ambient_object.txt"] = "ok"
 
     # railways.txt
-    export_railways_txt(map_dir / "railways.txt",
-                        province_data, territory_data, adjacencies)
+    export_railways_txt(map_dir / "railways.txt", province_data, territory_data, adjacencies)
     results["railways.txt"] = "ok"
 
     # unitstacks.txt
@@ -1170,8 +1206,7 @@ def export_all_map_files(
     # Directories that replace_path covers ; HOI4 skips vanilla
     # entirely for these, so no individual country/history override
     # files needed (that was generating 1,400+ empty txt files).
-    for d in ("history/countries", "history/units",
-              "common/countries"):
+    for d in ("history/countries", "history/units", "common/countries"):
         (mod_root / d).mkdir(parents=True, exist_ok=True)
 
     # common/country_tags/ is special ; we WANT blank overrides for
@@ -1222,6 +1257,7 @@ def export_all_map_files(
 # state history generation
 # ---------------------------------------------------------------------------
 
+
 def export_states(
     territory_data: list[dict],
     mod_root: Path,
@@ -1265,9 +1301,15 @@ def export_states(
     }
 
     STATE_CATEGORIES = [
-        ("wasteland", 1), ("small_island", 2), ("pastoral", 3),
-        ("rural", 5), ("town", 10), ("large_town", 20),
-        ("city", 40), ("large_city", 80), ("metropolis", 150),
+        ("wasteland", 1),
+        ("small_island", 2),
+        ("pastoral", 3),
+        ("rural", 5),
+        ("town", 10),
+        ("large_town", 20),
+        ("city", 40),
+        ("large_city", 80),
+        ("metropolis", 150),
         ("megalopolis", 300),
     ]
 
@@ -1302,7 +1344,9 @@ def export_states(
             chance = 0.04
             has_res = rng.random() < chance
             if has_res:
-                amount = max(1, int(rng.integers(5, 21) * res_base * res_factors.get(res_name, 1.0)))
+                amount = max(
+                    1, int(rng.integers(5, 21) * res_base * res_factors.get(res_name, 1.0))
+                )
                 resources[res_name] = amount
             else:
                 resources[res_name] = 0
@@ -1349,9 +1393,11 @@ def export_states(
 
     logger.info("Wrote %d state files to %s", count, state_dir)
 
+
 # ---------------------------------------------------------------------------
 # legacy exports (kept for backward compat)
 # ---------------------------------------------------------------------------
+
 
 def export_provinces_png(province_image: Image.Image, path: str | Path) -> None:
     """Legacy: write provinces.png (deprecated, use provinces.bmp)."""
@@ -1363,9 +1409,7 @@ def export_provinces_png(province_image: Image.Image, path: str | Path) -> None:
         logger.error("Failed to write provinces PNG %s: %s", path, e)
 
 
-def export_territory_definitions(
-    metadata: list[dict], path: str | Path, fmt: str = "json"
-) -> None:
+def export_territory_definitions(metadata: list[dict], path: str | Path, fmt: str = "json") -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -1388,22 +1432,22 @@ def export_territory_definitions(
                 w = csv.writer(f, delimiter=";")
                 w.writerow(["id", "territory_type", "R", "G", "B", "x", "y"])
                 for d in metadata:
-                    w.writerow([
-                        d["territory_id"],
-                        d["territory_type"],
-                        d["R"],
-                        d["G"],
-                        d["B"],
-                        round(d["x"], 2),
-                        round(d["y"], 2),
-                    ])
+                    w.writerow(
+                        [
+                            d["territory_id"],
+                            d["territory_type"],
+                            d["R"],
+                            d["G"],
+                            d["B"],
+                            round(d["x"], 2),
+                            round(d["y"], 2),
+                        ]
+                    )
     except OSError as e:
         logger.error("Failed to write territory definitions %s: %s", path, e)
 
 
-def export_province_definitions(
-    metadata: list[dict], path: str | Path, fmt: str = "json"
-) -> None:
+def export_province_definitions(metadata: list[dict], path: str | Path, fmt: str = "json") -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     has_terrain = any("province_terrain" in d for d in metadata)
@@ -1448,17 +1492,12 @@ def export_province_definitions(
         logger.error("Failed to write province definitions %s: %s", path, e)
 
 
-def export_territory_history(
-    metadata: list[dict], path: str | Path, fmt: str = "json"
-) -> None:
+def export_territory_history(metadata: list[dict], path: str | Path, fmt: str = "json") -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         if fmt == "json":
-            data = {
-                d["territory_id"]: {"provinces": d.get("province_ids", [])}
-                for d in metadata
-            }
+            data = {d["territory_id"]: {"provinces": d.get("province_ids", [])} for d in metadata}
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4)
         else:
@@ -1466,9 +1505,11 @@ def export_territory_history(
                 w = csv.writer(f, delimiter=";")
                 w.writerow(["id", "provinces"])
                 for d in metadata:
-                    w.writerow([
-                        d["territory_id"],
-                        ",".join(d.get("province_ids", [])),
-                    ])
+                    w.writerow(
+                        [
+                            d["territory_id"],
+                            ",".join(d.get("province_ids", [])),
+                        ]
+                    )
     except OSError as e:
         logger.error("Failed to write territory history %s: %s", path, e)

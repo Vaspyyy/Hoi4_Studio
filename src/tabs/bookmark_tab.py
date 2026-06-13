@@ -138,6 +138,7 @@ class BookmarkTab(QWidget):
 
         outer.addWidget(card)
 
+        self.mw.tags_changed.connect(self._refresh_countries)
         self._refresh_countries()
 
     # -----------------------------------------------------------------

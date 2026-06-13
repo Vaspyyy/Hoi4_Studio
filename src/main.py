@@ -185,6 +185,11 @@ class MainWindow(QMainWindow):
 
             return BookmarkTab(self)
 
+        def _make_validation():
+            from .tabs.validation_tab import ValidationTab
+
+            return ValidationTab(self)
+
         # Registry: (display_name, optional_factory, icon_color_key)
         # factory=None means eager (already built); factory=callable means lazy.
         # Order follows the natural modding workflow: set up, build nations,
@@ -203,6 +208,7 @@ class MainWindow(QMainWindow):
             (_make_world_map, _make_world_map, "Province Map"),
             (_make_map_gen, _make_map_gen, "Map Generator"),
             (_make_bookmark, _make_bookmark, "Bookmark Maker"),
+            (_make_validation, _make_validation, "Validation"),
         ]
 
         self._tab_defs = tab_defs

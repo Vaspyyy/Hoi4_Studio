@@ -16,7 +16,7 @@ FOCUS_ID_RE = re.compile(r"\bid\s*=\s*([A-Za-z0-9_\-%]+)")
 ICON_RE = re.compile(r"\bicon\s*=\s*([A-Za-z0-9_\-%]+)")
 X_RE = re.compile(r"\bx\s*=\s*(-?\d+)")
 Y_RE = re.compile(r"\by\s*=\s*(-?\d+)")
-COST_RE = re.compile(r"\bcost\s*=\s*(\d+)")
+COST_RE = re.compile(r"\bcost\s*=\s*(\d+(?:\.\d+)?)")
 PREREQ_RE = re.compile(r"\bfocus\s*=\s*([A-Za-z0-9_\-%]+)")
 
 
@@ -70,7 +70,7 @@ def load_focus_tree_file(path: Path) -> list[dict]:
                 "y": int(y.group(1)) if y else 0,
                 "prereq": prereqs,
                 "reward": reward,
-                "days": int(cost.group(1)) * 7 if cost else 70,
+                "days": int(float(cost.group(1)) * 7) if cost else 70,
             }
         )
     return nodes

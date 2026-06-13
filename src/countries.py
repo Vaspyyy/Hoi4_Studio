@@ -13,10 +13,6 @@ if TYPE_CHECKING:
     from .settings import HOI4Paths
 
 
-def ensure_dir(p: Path) -> None:
-    p.mkdir(parents=True, exist_ok=True)
-
-
 def create_mod_structure(paths: HOI4Paths) -> None:
     dirs = [
         "common/country_tags",
@@ -36,7 +32,7 @@ def create_mod_structure(paths: HOI4Paths) -> None:
         "interface",
     ]
     for d in dirs:
-        ensure_dir(paths.mod_root / d)
+        (paths.mod_root / d).mkdir(parents=True, exist_ok=True)
 
 
 def write_country_definition(mod_root: Path, tag: str, color: Tuple[int, int, int]) -> None:
@@ -341,7 +337,7 @@ def _detect_game_data_mods_dir(hoi4_install: Path | None) -> Path | None:
         mods_dir = Path(gdp) / "mod"
         if mods_dir.exists():
             return mods_dir
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError):
         pass
     return None
 
@@ -359,7 +355,7 @@ def _detect_game_version(hoi4_install: Path) -> str:
             if len(parts) >= 2:
                 return f"{parts[0]}.{parts[1]}.*"
         return "1.14.*"
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError):
         return "1.14.*"
 
 

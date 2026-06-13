@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QComboBox,
     QSpinBox,
+    QDialog,
+    QTextBrowser,
 )
 
 from .theme import ThemeColors, DARK_COLORS, AnimatedButton
@@ -356,3 +358,43 @@ class LabeledField(QWidget):
 
     def setText(self, t: str) -> None:
         self.line_edit.setText(t)
+
+
+class PreviewDialog(QDialog):
+    def __init__(self, diffs: list[dict], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Preview Changes")
+        self.resize(700, 500)
+        layout = QVBoxLayout(self)
+
+        total_changes = sum(1 for d in diffs if d["diff"])
+        layout.addWidget(QLabel(f"Previewing {total_changes} change(s)"))
+
+        browser = QTextBrowser()
+        browser.setReadOnly(True)
+        html_parts = []
+        for d in diffs:
+            if not d["diff"]:
+                continue
+            for line in d["diff"].splitlines():
+                if line.startswith("---") or line.startswith("+++"):
+                    continue
+                if line.startswith("-"):
+                    html_parts.append(f'<span style="color:#EF4444">{line}</span><br>')
+                elif line.startswith("+"):
+                    html_parts.append(f'<span style="color:#22C55E">{line}</span><br>')
+                elif line.startswith("@"):
+                    html_parts.append(f'<span style="color:#64748B">{line}</span><br>')
+                else:
+                    html_parts.append(f"{line}<br>")
+        browser.setHtml("".join(html_parts))
+        layout.addWidget(browser)
+
+        btn_row = QHBoxLayout()
+        btn_apply = AnimatedButton("Apply Changes")
+        btn_apply.clicked.connect(self.accept)
+        btn_cancel = AnimatedButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_apply)
+        btn_row.addWidget(btn_cancel)
+        layout.addLayout(btn_row)

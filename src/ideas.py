@@ -234,7 +234,8 @@ def _find_history_file(
         for cand in sorted(d.glob(f"{tag} - *.txt")):
             return cand
         for cand in sorted(d.glob(f"{tag}*.txt")):
-            return cand
+            if cand.stem.startswith(tag + " ") or cand.stem == tag:
+                return cand
     return None
 
 

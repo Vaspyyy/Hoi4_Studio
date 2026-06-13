@@ -8,9 +8,13 @@ or StateApplyWorker. Test cancellation, error propagation, and signal ordering.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import QDialog, QMessageBox
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QProgressBar, QPushButton, QWidget
 
 
 class StateIndexWorker(QThread):
@@ -107,3 +111,66 @@ class StateApplyWorker(QThread):
             self.result.emit(results)
         except Exception as e:
             self.error.emit(str(e))
+
+
+def run_state_apply(
+    parent: QWidget,
+    mod_root: Path,
+    tag: str,
+    state_ids: list[int],
+    hoi4_install: Path | None,
+    remove_other_cores: bool,
+    create_backup: bool,
+    btn_apply: QPushButton,
+    btn_cancel: QPushButton,
+    progress: QProgressBar,
+    on_progress,
+    on_result,
+    on_error,
+) -> StateApplyWorker | None:
+    """Shared state-apply workflow: preview → confirm → worker.
+
+    Returns the worker if started, or None if cancelled/errored.
+    """
+    from .states import preview_states
+    from .widgets import PreviewDialog
+
+    previews = preview_states(
+        mod_root, tag, state_ids, hoi4_install, remove_other_cores=remove_other_cores
+    )
+
+    has_changes = any(p["diff"] for p in previews)
+    has_errors = any(not p["success"] for p in previews)
+
+    if has_errors:
+        error_msgs = "\n".join(
+            f"  [{p['state_id']}] {p['message']}" for p in previews if not p["success"]
+        )
+        QMessageBox.critical(
+            parent, "Errors Found", f"Some states could not be processed:\n{error_msgs}"
+        )
+        return None
+
+    if has_changes:
+        dlg = PreviewDialog(previews, parent)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+
+    btn_apply.setEnabled(False)
+    btn_cancel.setVisible(True)
+    progress.setVisible(True)
+    progress.setValue(0)
+
+    worker = StateApplyWorker(
+        mod_root,
+        tag,
+        state_ids,
+        hoi4_install,
+        remove_other_cores=remove_other_cores,
+        create_backup=create_backup,
+    )
+    worker.progress.connect(on_progress)
+    worker.result.connect(on_result)
+    worker.error.connect(on_error)
+    worker.start()
+    return worker

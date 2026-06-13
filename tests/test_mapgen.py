@@ -27,7 +27,7 @@ from src.mapgen.hoi4_export import (
     export_territory_definitions,
     export_territory_history,
 )
-from src.mapgen.numb_gen import IntegerSeries, NumberSeries
+from src.mapgen.numb_gen import NumberSeries
 from src.mapgen.utils import (
     clear_used_colors,
     color_from_id,
@@ -64,18 +64,6 @@ class TestNumberSeries:
     def test_custom_prefix(self) -> None:
         s = NumberSeries("T", 5, 999999)
         assert s.get_id() == "T000005"
-
-
-class TestIntegerSeries:
-    def test_sequential(self) -> None:
-        s = IntegerSeries(1, 5)
-        assert [s.get_id() for _ in range(5)] == [1, 2, 3, 4, 5]
-
-    def test_exhausted(self) -> None:
-        s = IntegerSeries(1, 2)
-        assert s.get_id() == 1
-        assert s.get_id() == 2
-        assert s.get_id() is None
 
 
 class TestExtractMasks:

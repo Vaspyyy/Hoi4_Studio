@@ -1338,7 +1338,7 @@ def export_states(
                 category = cat_name
 
         # ---- auto resources ----
-        rng = np.random.default_rng(tid + 42)
+        rng = np.random.default_rng(tid * 1000 + 42)
         resources: dict[str, int] = {}
         for res_name in ("aluminium", "chromium", "coal", "oil", "rubber", "steel", "tungsten"):
             chance = 0.04

@@ -146,7 +146,7 @@ def _read_country_localisation(
             raw = f.read_bytes()
             try:
                 txt = raw.decode("utf-8-sig")
-            except Exception:
+            except UnicodeDecodeError:
                 txt = raw.decode("utf-8", errors="ignore")
             if f"{tag}:" not in txt:
                 continue
@@ -383,8 +383,8 @@ class CountryTab(QWidget):
         if source_val is not None:
             remaining = 100 - source_val
             if remaining < 0:
-                assert source is not None
-                source.setValue(100)
+                if source is not None:
+                    source.setValue(100)
                 remaining = 0
             others_total = sum(s.value() for s in others)
             if others_total == 0 and remaining > 0:
@@ -660,6 +660,6 @@ class CountryTab(QWidget):
             self.mw.log_panel.log(f"Nation {tag} written to disk.", "success")
             self.mw.status_message(f"Nation {tag} written")
             self.mw.refresh_all_tag_dropdowns()
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             self.mw.log_panel.log(str(e), "error")
             QMessageBox.critical(self, "Error", str(e))

@@ -6,4 +6,4 @@ importlib.metadata can't find the package.  When bumping the version
 also update ``pyproject.toml``.
 """
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"

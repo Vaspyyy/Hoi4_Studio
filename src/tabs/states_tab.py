@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -19,54 +18,12 @@ from PySide6.QtWidgets import (
 )
 
 from ..theme import AnimatedButton, create_card_widget, create_section_title
-from ..states import preview_states
 from ..widgets import TagPickerWidget
-from ..workers import StateApplyWorker
+from ..workers import run_state_apply
 
 if TYPE_CHECKING:
     from ..main import MainWindow
-
-
-class PreviewDialog(QDialog):
-    def __init__(self, diffs: list[dict], parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setWindowTitle("Preview Changes")
-        self.resize(700, 500)
-        layout = QVBoxLayout(self)
-
-        total_changes = sum(1 for d in diffs if d["diff"])
-        layout.addWidget(QLabel(f"Previewing {total_changes} change(s)"))
-
-        from PySide6.QtWidgets import QTextBrowser
-
-        browser = QTextBrowser()
-        browser.setReadOnly(True)
-        html_parts = []
-        for d in diffs:
-            if not d["diff"]:
-                continue
-            for line in d["diff"].splitlines():
-                if line.startswith("---") or line.startswith("+++"):
-                    continue
-                if line.startswith("-"):
-                    html_parts.append(f'<span style="color:#EF4444">{line}</span><br>')
-                elif line.startswith("+"):
-                    html_parts.append(f'<span style="color:#22C55E">{line}</span><br>')
-                elif line.startswith("@"):
-                    html_parts.append(f'<span style="color:#64748B">{line}</span><br>')
-                else:
-                    html_parts.append(f"{line}<br>")
-        browser.setHtml("".join(html_parts))
-        layout.addWidget(browser)
-
-        btn_row = QHBoxLayout()
-        btn_apply = AnimatedButton("Apply Changes")
-        btn_apply.clicked.connect(self.accept)
-        btn_cancel = AnimatedButton("Cancel")
-        btn_cancel.clicked.connect(self.reject)
-        btn_row.addWidget(btn_apply)
-        btn_row.addWidget(btn_cancel)
-        layout.addLayout(btn_row)
+    from ..workers import StateApplyWorker
 
 
 class StatesTab(QWidget):
@@ -160,48 +117,21 @@ class StatesTab(QWidget):
             QMessageBox.warning(self, "Missing IDs", "Please provide one or more state IDs.")
             return
 
-        previews = preview_states(
+        self._apply_worker = run_state_apply(
+            self,
             self.mw.paths.mod_root,
             tag,
             state_ids,
             self.mw.paths.hoi4_install,
-            remove_other_cores=self.remove_other_cores.isChecked(),
+            self.remove_other_cores.isChecked(),
+            self.create_backup_cb.isChecked(),
+            self.btn_apply,
+            self.btn_cancel,
+            self.progress,
+            self._on_progress,
+            self._on_done,
+            self._on_error,
         )
-
-        has_changes = any(p["diff"] for p in previews)
-        has_errors = any(not p["success"] for p in previews)
-
-        if has_errors:
-            error_msgs = "\n".join(
-                f"  [{p['state_id']}] {p['message']}" for p in previews if not p["success"]
-            )
-            QMessageBox.critical(
-                self, "Errors Found", f"Some states could not be processed:\n{error_msgs}"
-            )
-            return
-
-        if has_changes:
-            dlg = PreviewDialog(previews, self)
-            if dlg.exec() != QDialog.DialogCode.Accepted:
-                return
-
-        self.btn_apply.setEnabled(False)
-        self.btn_cancel.setVisible(True)
-        self.progress.setVisible(True)
-        self.progress.setValue(0)
-
-        self._apply_worker = StateApplyWorker(
-            self.mw.paths.mod_root,
-            tag,
-            state_ids,
-            self.mw.paths.hoi4_install,
-            remove_other_cores=self.remove_other_cores.isChecked(),
-            create_backup=self.create_backup_cb.isChecked(),
-        )
-        self._apply_worker.progress.connect(self._on_progress)
-        self._apply_worker.result.connect(self._on_done)
-        self._apply_worker.error.connect(self._on_error)
-        self._apply_worker.start()
 
     def _on_progress(self, current: int, total: int) -> None:
         self.progress.setMaximum(total)

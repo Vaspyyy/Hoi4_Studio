@@ -15,6 +15,7 @@ _lazy = {
     "LocalizationManagerTab": ".localization_tab",
     "MapGeneratorTab": ".map_generator_tab",
     "BookmarkTab": ".bookmark_tab",
+    "ValidationTab": ".validation_tab",
 }
 
 __all__ = list(_lazy.keys())

@@ -138,7 +138,6 @@ class PdxNode:
     key: Optional[str] = None
     value: Optional[str] = None
     children: list["PdxNode"] = field(default_factory=list)
-    operator: str = "="
     is_comment: bool = False
 
     def is_block(self) -> bool:
@@ -311,8 +310,14 @@ def serialize_pdx(node: PdxNode, indent: int = 0) -> str:
     elif node.value is not None:
         if node.key is not None:
             v = node.value
-            if " " in v or '"' in v:
-                v = f'"{v}"'
+            if " " in v or '"' in v or "\n" in v or "\t" in v or "#" in v:
+                escaped = (
+                    v.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                )
+                v = f'"{escaped}"'
             parts.append(f"{tab}{node.key} = {v}\n")
         else:
             parts.append(f"{tab}{node.value}\n")

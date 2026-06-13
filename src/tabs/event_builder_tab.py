@@ -4,6 +4,7 @@ HOI4 Modding Studio - Event Builder Tab
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -379,7 +380,7 @@ class EventBuilderTab(QWidget):
         display_opts = len(event_data.get("options", [])) or 1
         type_tag = _event_tag(event_data.get("type", "country_event"))
         new_text = f"[{type_tag}] {event_data['id']}: {event_data['title']} ({display_opts} opts)"
-        old_data = self.events_data[row]
+        old_data = copy.deepcopy(self.events_data[row])
 
         def redo():
             self.events_data[row] = event_data
@@ -397,7 +398,7 @@ class EventBuilderTab(QWidget):
     def remove_event(self) -> None:
         row = self.events_list.currentRow()
         if 0 <= row < len(self.events_data):
-            ev = self.events_data[row]
+            ev = copy.deepcopy(self.events_data[row])
             list_text = self.events_list.item(row).text() if self.events_list.item(row) else ""
 
             def redo():

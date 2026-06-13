@@ -59,6 +59,14 @@ from ..theme import AnimatedButton, create_card_widget, create_section_title
 if TYPE_CHECKING:
     from ..main import MainWindow
 
+_logger = logging.getLogger("hoi4_studio.world_map")
+
+
+def _arr_to_qimage(arr: np.ndarray) -> QImage:
+    h, w = arr.shape[:2]
+    qimg = QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+    return qimg.copy()
+
 
 def _fingerprint(path: Path) -> Optional[tuple[float, int]]:
     try:
@@ -174,7 +182,7 @@ def _parse_country_colors(
             return already_read[key]
         try:
             txt = p.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
+        except OSError:
             txt = ""
         already_read[key] = txt
         return txt
@@ -251,7 +259,7 @@ def _parse_state_owners(
             try:
                 txt = f.read_text(encoding="utf-8", errors="ignore")
                 root = parse_pdx(txt)
-            except Exception:
+            except (OSError, ValueError):
                 continue
 
             state_block = None
@@ -424,7 +432,7 @@ def _load_water_texture(
             arr = np.array(img, dtype=np.uint8)
             if arr.shape[:2] == (h, w):
                 return arr
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
             _wl.debug("Failed to load water texture %s: %s", dds_path, e)
             continue
     _wl.debug("No water texture found")
@@ -453,7 +461,7 @@ def _load_rivers_mask(mod_root: Path, h: int, w: int) -> Optional[np.ndarray]:
             mask = np.array(mask_img) > 127
         mask_arr: np.ndarray = mask
         return mask_arr
-    except Exception:
+    except (OSError, ValueError):
         return None
 
 
@@ -710,11 +718,11 @@ class MapRenderWorker(QThread):
             self.clean_arr = result_arr
             self.bordered_arr = bordered_arr
 
-            clean_img = self._arr_to_qimage(result_arr)
-            bordered_img = self._arr_to_qimage(bordered_arr)
+            clean_img = _arr_to_qimage(result_arr)
+            bordered_img = _arr_to_qimage(bordered_arr)
 
             self.finished.emit(clean_img, bordered_img, num_states, num_countries, num_unassigned)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             self.error.emit(str(e))
 
     def _load_provinces_bmp(self) -> "np.ndarray":
@@ -728,14 +736,6 @@ class MapRenderWorker(QThread):
         for loc_dir in self.loc_dirs:
             loc.update(parse_english_localisation(loc_dir))
         return loc
-
-    @staticmethod
-    def _arr_to_qimage(arr: np.ndarray) -> QImage:
-        # TODO: QImage created from arr.data ; if numpy array is GC'd before
-        # QImage renders, this segfaults. The .copy() below mitigates but narrow window.
-        h, w = arr.shape[:2]
-        qimg = QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888)
-        return qimg.copy()
 
     @staticmethod
     def _compute_bordered(
@@ -895,7 +895,8 @@ class LabelComputeWorker(QThread):
         try:
             regions = _compute_country_regions_fast(self._state_img, self._state_owner)
             self.finished.emit(regions)
-        except Exception:
+        except (OSError, ValueError):
+            _logger.debug("Label computation failed", exc_info=True)
             self.finished.emit([])
 
 
@@ -1255,10 +1256,10 @@ class MapGraphicsView(QGraphicsView):
 
         rivers_clean = self._apply_rivers(self._clean_arr)
         h, w = rivers_clean.shape[:2]
-        self._rivers_clean_qimg = self._arr_to_qimage(rivers_clean)
+        self._rivers_clean_qimg = _arr_to_qimage(rivers_clean)
 
         rivers_bordered = self._apply_rivers(self._bordered_arr)
-        self._rivers_bordered_qimg = self._arr_to_qimage(rivers_bordered)
+        self._rivers_bordered_qimg = _arr_to_qimage(rivers_bordered)
 
     def _get_display_image(self) -> Optional[QImage]:
         if self._mass_transfer_mode and self._selected_state_ids:
@@ -1383,7 +1384,7 @@ class MapGraphicsView(QGraphicsView):
 
             state_img = self._cached_state_img
             if state_img is None:
-                self._highlight_qimg = self._arr_to_qimage(highlight)
+                self._highlight_qimg = _arr_to_qimage(highlight)
                 return
 
             selected_mask = np.isin(state_img, list(self._selected_state_ids))
@@ -1403,15 +1404,9 @@ class MapGraphicsView(QGraphicsView):
             highlight[border, 1] = 200
             highlight[border, 2] = 50
 
-            self._highlight_qimg = self._arr_to_qimage(highlight)
-        except Exception:
+            self._highlight_qimg = _arr_to_qimage(highlight)
+        except (OSError, ValueError):
             self._highlight_qimg = None
-
-    @staticmethod
-    def _arr_to_qimage(arr: np.ndarray) -> QImage:
-        h, w = arr.shape[:2]
-        qimg = QImage(arr.data, w, h, 3 * w, QImage.Format.Format_RGB888)
-        return qimg.copy()
 
     def _lookup_at(self, pos) -> Optional[dict]:
         if self._provinces_arr is None:

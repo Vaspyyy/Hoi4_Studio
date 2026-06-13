@@ -30,14 +30,11 @@ from ..modifiers_catalog import ALL_MODIFIERS, MODIFIER_CATEGORIES
 if TYPE_CHECKING:
     from ..main import MainWindow
 
-from PySide6.QtGui import QUndoStack
-
 
 class IdeasTab(QWidget):
     def __init__(self, mw: "MainWindow"):
         super().__init__()
         self.mw = mw
-        self.undo_stack = QUndoStack(self)
         self._current_tag: str | None = None
 
         outer = QVBoxLayout(self)
@@ -196,6 +193,8 @@ class IdeasTab(QWidget):
         layout.addLayout(btn_row)
 
         outer.addWidget(card)
+
+        self.mw.tags_changed.connect(self._reload_tags)
 
     # ── Data helpers ────────────────────────────────────────────────────
 

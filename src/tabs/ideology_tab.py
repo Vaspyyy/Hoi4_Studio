@@ -406,10 +406,7 @@ class IdeologyTab(QWidget):
 
     def _add_modifier_row(self, key: str, value: str) -> None:
         lbl = QLabel(key)
-        try:
-            lbl.setToolTip(key)
-        except Exception:
-            pass
+        lbl.setToolTip(key)
         try:
             val = float(value)
         except ValueError:
@@ -515,5 +512,5 @@ class IdeologyTab(QWidget):
 
             refresh_effect_catalog(self._ideologies)
             QMessageBox.information(self, "Saved", "Ideology files written to common/ideologies/")
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             QMessageBox.critical(self, "Error", f"Failed to save: {e}")

@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,15 +21,14 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
 )
 
-from ..tabs.states_tab import PreviewDialog
 from ..theme import AnimatedButton, create_card_widget, create_section_title
-from ..states import preview_states
 from ..localisation import parse_english_localisation
-from ..workers import StateApplyWorker, StateIndexWorker
+from ..workers import StateIndexWorker, run_state_apply
 from ..widgets import TagPickerWidget
 
 if TYPE_CHECKING:
     from ..main import MainWindow
+    from ..workers import StateApplyWorker
 
 
 class StateBrowserTab(QWidget):
@@ -103,6 +101,7 @@ class StateBrowserTab(QWidget):
         self.search.textChanged.connect(self.refresh)
 
         outer.addWidget(card)
+        self.mw.tags_changed.connect(self.reload_tags)
         self.reload_tags()
 
     def reload_tags(self):
@@ -187,48 +186,21 @@ class StateBrowserTab(QWidget):
         self._apply_tag = tag
         sorted_ids = sorted(self.selected)
 
-        previews = preview_states(
+        self._apply_worker = run_state_apply(
+            self,
             self.mw.paths.mod_root,
             self._apply_tag,
             sorted_ids,
             self.mw.paths.hoi4_install,
-            remove_other_cores=self.remove_other_cores.isChecked(),
+            self.remove_other_cores.isChecked(),
+            self.create_backup_cb.isChecked(),
+            self.btn_apply,
+            self.btn_cancel,
+            self.progress,
+            self._on_progress,
+            self._on_done,
+            self._on_error,
         )
-
-        has_changes = any(p["diff"] for p in previews)
-        has_errors = any(not p["success"] for p in previews)
-
-        if has_errors:
-            error_msgs = "\n".join(
-                f"  [{p['state_id']}] {p['message']}" for p in previews if not p["success"]
-            )
-            QMessageBox.critical(
-                self, "Errors Found", f"Some states could not be processed:\n{error_msgs}"
-            )
-            return
-
-        if has_changes:
-            dlg = PreviewDialog(previews, self)
-            if dlg.exec() != QDialog.DialogCode.Accepted:
-                return
-
-        self.btn_apply.setEnabled(False)
-        self.btn_cancel.setVisible(True)
-        self.progress.setVisible(True)
-        self.progress.setValue(0)
-
-        self._apply_worker = StateApplyWorker(
-            self.mw.paths.mod_root,
-            self._apply_tag,
-            sorted_ids,
-            self.mw.paths.hoi4_install,
-            remove_other_cores=self.remove_other_cores.isChecked(),
-            create_backup=self.create_backup_cb.isChecked(),
-        )
-        self._apply_worker.progress.connect(self._on_progress)
-        self._apply_worker.result.connect(self._on_done)
-        self._apply_worker.error.connect(self._on_error)
-        self._apply_worker.start()
 
     def _on_progress(self, current: int, total: int) -> None:
         self.progress.setMaximum(total)

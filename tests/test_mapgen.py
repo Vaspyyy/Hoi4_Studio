@@ -10,8 +10,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from scipy.ndimage import label as ndlabel
+
 from src.mapgen.config import (
     DEFAULT_DENSITY_GREY,
+    LAKE_COLOR,
     OCEAN_COLOR,
 )
 from src.mapgen.density_generator import create_equator_density, create_uniform_density
@@ -28,9 +31,13 @@ from src.mapgen.hoi4_export import (
     export_territory_history,
 )
 from src.mapgen.numb_gen import NumberSeries
+from src.mapgen.province_generator import generate_provinces
+from src.mapgen.territory_generator import generate_territories
 from src.mapgen.utils import (
+    _remove_enclaves,
     clear_used_colors,
     color_from_id,
+    derive_seed,
     extract_masks,
     random_seeds,
 )
@@ -128,6 +135,229 @@ class TestDensityGenerator:
         center = arr[50, 0]
         edge = arr[0, 0]
         assert center < edge
+
+
+def _make_lake_image(w: int = 100, h: int = 100) -> Image.Image:
+    """Land image with an ocean top half and a small lake inside the land half."""
+    img = _make_land_image(w, h)
+    arr = np.array(img)
+    arr[70:80, 40:50, 0] = LAKE_COLOR[0]
+    arr[70:80, 40:50, 1] = LAKE_COLOR[1]
+    arr[70:80, 40:50, 2] = LAKE_COLOR[2]
+    return Image.fromarray(arr, mode="RGBA")
+
+
+def _gen_territories(land_image: Image.Image | None = None, **kw):
+    params: dict = dict(land_count=4, ocean_count=2)
+    params.update(kw)
+    return generate_territories(land_image or _make_land_image(), None, None, **params)
+
+
+def _gen_provinces(terr, **kw):
+    params: dict = dict(land_count=12, ocean_count=6)
+    params.update(kw)
+    return generate_provinces(terr.pmap, terr.metadata, terr.masks, None, **params)
+
+
+class TestGenerateTerritories:
+    def test_every_pixel_assigned(self) -> None:
+        res = _gen_territories()
+        assert (res.pmap >= 0).all()
+
+    def test_requested_counts_produced(self) -> None:
+        res = _gen_territories()
+        land = [m for m in res.metadata if m["territory_type"] == "land"]
+        ocean = [m for m in res.metadata if m["territory_type"] == "ocean"]
+        assert len(land) == 4
+        assert len(ocean) == 2
+
+    def test_pmap_indices_unique_and_ordered(self) -> None:
+        indices = [m["_pmap_index"] for m in _gen_territories().metadata]
+        assert indices == sorted(set(indices))
+
+    def test_land_pixels_map_to_land_territories(self) -> None:
+        res = _gen_territories()
+        by_index = {m["_pmap_index"]: m for m in res.metadata}
+        land_mask = res.masks["land_mask"]
+        types = {by_index[int(i)]["territory_type"] for i in np.unique(res.pmap[land_mask])}
+        assert types == {"land"}
+
+    def test_image_dimensions_match_input(self) -> None:
+        res = _gen_territories()
+        assert res.image.size == (100, 100)
+
+    def test_jagged_regions_stay_contiguous(self) -> None:
+        res = _gen_territories(jagged_land=True, jagged_ocean=True)
+        for idx in np.unique(res.pmap):
+            _, n = ndlabel(res.pmap == idx)
+            assert n == 1, f"territory {idx} split into {n} components"
+
+
+class TestGenerateProvinces:
+    def test_every_pixel_assigned(self) -> None:
+        res = _gen_provinces(_gen_territories())
+        assert (res.pmap >= 0).all()
+
+    def test_province_never_spans_two_territories(self) -> None:
+        terr = _gen_territories()
+        res = _gen_provinces(terr)
+        for idx in np.unique(res.pmap):
+            owning = np.unique(terr.pmap[res.pmap == idx])
+            assert len(owning) == 1, f"province {idx} spans territories {owning}"
+
+    def test_province_territory_id_matches_pmap(self) -> None:
+        terr = _gen_territories()
+        res = _gen_provinces(terr)
+        terr_ids = {m["_pmap_index"]: m["territory_id"] for m in terr.metadata}
+        for prov in res.metadata:
+            pixels = res.pmap == prov["_pmap_index"]
+            if not pixels.any():
+                continue
+            owner = int(np.unique(terr.pmap[pixels])[0])
+            assert prov["territory_id"] == terr_ids[owner]
+
+    def test_at_least_one_province_per_territory(self) -> None:
+        terr = _gen_territories()
+        res = _gen_provinces(terr)
+        assert len(res.metadata) >= len(terr.metadata)
+
+    def test_territories_get_province_ids(self) -> None:
+        terr = _gen_territories()
+        _gen_provinces(terr)
+        for d in terr.metadata:
+            assert d.get("province_ids"), f"territory {d['territory_id']} has no provinces"
+
+    def test_province_ids_unique(self) -> None:
+        res = _gen_provinces(_gen_territories())
+        ids = [m["province_id"] for m in res.metadata]
+        assert len(ids) == len(set(ids))
+
+    def test_centroids_are_in_full_map_coordinates(self) -> None:
+        """Provinces are carved inside a per-territory crop; centroids must be
+        offset back into full-map space (regression guard for the bbox refactor)."""
+        terr = _gen_territories()
+        res = _gen_provinces(terr)
+        for prov in res.metadata:
+            pixels = res.pmap == prov["_pmap_index"]
+            if not pixels.any():
+                continue
+            ys, xs = np.where(pixels)
+            # the centroid is computed pre-border-expansion, so it must fall
+            # inside the final province's bounding box
+            assert xs.min() <= prov["x"] <= xs.max(), (
+                f"province {prov['province_id']} x={prov['x']} outside [{xs.min()},{xs.max()}]"
+            )
+            assert ys.min() <= prov["y"] <= ys.max(), (
+                f"province {prov['province_id']} y={prov['y']} outside [{ys.min()},{ys.max()}]"
+            )
+
+    def test_terrain_defaults_without_terrain_image(self) -> None:
+        res = _gen_provinces(_gen_territories())
+        for prov in res.metadata:
+            assert prov["province_terrain"]
+
+    def test_lakes_become_their_own_provinces(self) -> None:
+        terr = _gen_territories(_make_lake_image())
+        res = _gen_provinces(terr)
+        lakes = [m for m in res.metadata if m["province_type"] == "lake"]
+        assert len(lakes) == 1
+        lake_mask = terr.masks["lake_mask"]
+        assert (res.pmap[lake_mask] == lakes[0]["_pmap_index"]).all()
+
+    def test_density_map_preserves_coverage(self) -> None:
+        terr = _gen_territories()
+        density = create_equator_density(100, 100)
+        res = generate_provinces(
+            terr.pmap, terr.metadata, terr.masks, density, land_count=12, ocean_count=6
+        )
+        assert (res.pmap >= 0).all()
+
+    def test_jagged_provinces_stay_within_territory(self) -> None:
+        terr = _gen_territories()
+        res = _gen_provinces(terr, jagged_land=True, jagged_ocean=True)
+        for idx in np.unique(res.pmap):
+            owning = np.unique(terr.pmap[res.pmap == idx])
+            assert len(owning) == 1
+
+    def test_progress_reaches_100(self) -> None:
+        terr = _gen_territories()
+        seen: list[int] = []
+        generate_provinces(
+            terr.pmap,
+            terr.metadata,
+            terr.masks,
+            None,
+            land_count=12,
+            ocean_count=6,
+            progress_fn=seen.append,
+        )
+        assert seen and seen[-1] == 100
+        assert all(0 <= p <= 100 for p in seen)
+
+
+class TestSeeding:
+    def test_same_seed_reproduces_territories(self) -> None:
+        a = _gen_territories(seed=1234)
+        b = _gen_territories(seed=1234)
+        assert np.array_equal(a.pmap, b.pmap)
+
+    def test_same_seed_reproduces_provinces(self) -> None:
+        a = _gen_provinces(_gen_territories(seed=7), seed=7)
+        b = _gen_provinces(_gen_territories(seed=7), seed=7)
+        assert np.array_equal(a.pmap, b.pmap)
+        assert [m["x"] for m in a.metadata] == [m["x"] for m in b.metadata]
+
+    def test_same_seed_reproduces_jagged_borders(self) -> None:
+        kw = dict(jagged_land=True, jagged_ocean=True)
+        a = _gen_territories(seed=99, **kw)
+        b = _gen_territories(seed=99, **kw)
+        assert np.array_equal(a.pmap, b.pmap)
+
+    def test_different_seeds_differ(self) -> None:
+        a = _gen_territories(seed=1)
+        b = _gen_territories(seed=2)
+        assert not np.array_equal(a.pmap, b.pmap)
+
+    def test_no_seed_stays_random(self) -> None:
+        a = _gen_territories()
+        b = _gen_territories()
+        assert not np.array_equal(a.pmap, b.pmap)
+
+    def test_derive_seed_is_stable_and_separated(self) -> None:
+        assert derive_seed(5, 0) == derive_seed(5, 0)
+        assert derive_seed(5, 0) != derive_seed(5, 1)
+        assert derive_seed(5, 0) != derive_seed(6, 0)
+
+    def test_derive_seed_passes_through_none(self) -> None:
+        assert derive_seed(None, 0) is None
+        assert derive_seed(None, 3, 4) is None
+
+
+class TestRemoveEnclaves:
+    def test_detached_fragment_is_reassigned(self) -> None:
+        pmap = np.zeros((20, 20), np.int32)
+        pmap[:, 10:] = 1
+        # island of region 0 stranded inside region 1's area
+        pmap[2:5, 15:18] = 0
+        mask = np.ones((20, 20), bool)
+        _remove_enclaves(pmap, mask)
+        for rid in np.unique(pmap):
+            _, n = ndlabel(pmap == rid)
+            assert n == 1
+
+    def test_contiguous_map_is_unchanged(self) -> None:
+        pmap = np.zeros((20, 20), np.int32)
+        pmap[:, 10:] = 1
+        before = pmap.copy()
+        _remove_enclaves(pmap, np.ones((20, 20), bool))
+        assert (pmap == before).all()
+
+    def test_no_pixel_left_unassigned(self) -> None:
+        pmap = np.zeros((20, 20), np.int32)
+        pmap[:, 10:] = 1
+        pmap[2:5, 15:18] = 0
+        _remove_enclaves(pmap, np.ones((20, 20), bool))
+        assert (pmap >= 0).all()
 
 
 class TestExportDefinitionCsv:

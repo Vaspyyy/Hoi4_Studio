@@ -4,7 +4,12 @@ from typing import Callable
 
 import numpy as np
 from PIL import Image
-from scipy.ndimage import binary_dilation, distance_transform_edt, label as ndlabel
+from scipy.ndimage import (
+    binary_dilation,
+    distance_transform_edt,
+    find_objects,
+    label as ndlabel,
+)
 from scipy.spatial import cKDTree
 
 from . import config
@@ -14,6 +19,20 @@ MAX_LLOYD_SAMPLE = 100_000
 STEPS_PER_REGION_MAP = 1 + config.LLOYD_ITERATIONS + 1 + 1
 
 used_colors: set[tuple[int, int, int]] = set()
+
+
+def derive_seed(base: int | None, *path: int) -> int | None:
+    """Derive an independent, reproducible sub-seed from a base seed.
+
+    Generation draws from several places (seed scatter, Lloyd relaxation, border
+    jitter) across many regions. Each needs its own stream, or they correlate;
+    `path` names the stream so the same base seed always reproduces the map.
+    Returns None when no base seed is set, which keeps generation random.
+    """
+    if base is None:
+        return None
+    entropy = [int(base), *(int(p) for p in path)]
+    return int(np.random.SeedSequence(entropy).generate_state(1, dtype=np.uint32)[0])
 
 
 def clear_used_colors() -> None:
@@ -124,14 +143,14 @@ def lloyd_relaxation(
 
 
 def _build_jitter_maps(
-    h: int, w: int, seeds_arr: np.ndarray
+    h: int, w: int, seeds_arr: np.ndarray, rng_seed: int | None = None
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
     if len(seeds_arr) < 2:
         return None, None
 
     from scipy.ndimage import zoom as ndzoom
 
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(rng_seed)
     seed_tree = cKDTree(seeds_arr)
     nn_dists, _ = seed_tree.query(seeds_arr, k=2)
     avg_dist = float(nn_dists[:, 1].mean())
@@ -161,22 +180,48 @@ def _jitter_coords(
     return out
 
 
+def _pad_box(
+    box: tuple[slice, ...], shape: tuple[int, ...], amount: int = 1
+) -> tuple[slice, ...]:
+    """Grow a bounding box by `amount` pixels, clamped to the array bounds."""
+    return tuple(
+        slice(max(0, s.start - amount), min(dim, s.stop + amount))
+        for s, dim in zip(box, shape)
+    )
+
+
 def _remove_enclaves(pmap: np.ndarray, mask: np.ndarray) -> None:
     unique_ids = np.unique(pmap[mask])
     unique_ids = unique_ids[unique_ids >= 0]
+    if unique_ids.size == 0:
+        return
 
     cleared = np.zeros(pmap.shape, dtype=bool)
 
+    # Work inside each region's bounding box; a region touches a tiny slice of the
+    # map, so labelling the full canvas once per region is wasted work. Region ids
+    # are rebased to 1..n first — find_objects allocates a list as long as the
+    # largest label, and ids here carry a start_index offset that can be large.
+    base = int(unique_ids.min())
+    # ids below `base` (and the -1 sentinel) fall outside `mask` and are background here
+    labels = np.where(pmap >= base, pmap - base + 1, 0)
+    region_boxes = find_objects(labels)
+
     for rid in unique_ids:
-        region_mask = pmap == rid
+        box = region_boxes[rid - base] if rid - base < len(region_boxes) else None
+        if box is None:
+            continue
+
+        sub_pmap = pmap[box]
+        region_mask = sub_pmap == rid
         labeled, n = ndlabel(region_mask)
         if n <= 1:
             continue
         comp_sizes = np.bincount(labeled.ravel())[1:]
         largest = comp_sizes.argmax() + 1
         small = region_mask & (labeled != largest)
-        pmap[small] = -1
-        cleared |= small
+        sub_pmap[small] = -1
+        cleared[box] |= small
 
     if cleared.any() and (pmap >= 0).any():
         # reassign each cleared fragment to the neighbouring territory
@@ -184,13 +229,21 @@ def _remove_enclaves(pmap: np.ndarray, mask: np.ndarray) -> None:
         # (was: Euclidean distance_transform_edt ; that could reassign
         #  a fragment back to the SAME territory across a water barrier.)
         cleared_labels, n_frags = ndlabel(cleared & mask)
+        frag_boxes = find_objects(cleared_labels)
         for cl in range(1, n_frags + 1):
-            frag = cleared_labels == cl
+            box = frag_boxes[cl - 1]
+            if box is None:
+                continue
+            # pad by 1 so the dilation can see across the fragment's edge
+            box = _pad_box(box, pmap.shape)
+
+            sub_pmap = pmap[box]
+            frag = cleared_labels[box] == cl
             dilated = binary_dilation(frag)
-            neighbours = dilated & (pmap >= 0) & mask
-            nbr_ids, nbr_counts = np.unique(pmap[neighbours], return_counts=True)
+            neighbours = dilated & (sub_pmap >= 0) & mask[box]
+            nbr_ids, nbr_counts = np.unique(sub_pmap[neighbours], return_counts=True)
             if len(nbr_ids) > 0:
-                pmap[frag] = nbr_ids[nbr_counts.argmax()]
+                sub_pmap[frag] = nbr_ids[nbr_counts.argmax()]
 
 
 def assign_regions(
@@ -198,6 +251,7 @@ def assign_regions(
     seeds: list[tuple[int, int]],
     start_index: int,
     jagged: bool = False,
+    rng_seed: int | None = None,
 ) -> np.ndarray:
     h, w = mask.shape
     pmap = np.full((h, w), -1, np.int32)
@@ -209,7 +263,7 @@ def assign_regions(
 
     jitter_x = jitter_y = None
     if jagged:
-        jitter_x, jitter_y = _build_jitter_maps(h, w, seeds_arr)
+        jitter_x, jitter_y = _build_jitter_maps(h, w, seeds_arr, rng_seed)
 
     labeled, num_components = ndlabel(mask)
 
@@ -402,6 +456,7 @@ def create_region_map(
     density: np.ndarray | None = None,
     density_strength: float = 1.0,
     jagged: bool = False,
+    rng_seed: int | None = None,
 ) -> tuple[np.ndarray, list[dict], int]:
     _step = step_fn if step_fn is not None else (lambda n=1: None)
 
@@ -410,7 +465,13 @@ def create_region_map(
         empty = np.full(fill_mask.shape, -1, np.int32)
         return empty, [], start_index
 
-    seeds = random_seeds(fill_mask, num_points, density=density, density_strength=density_strength)
+    seeds = random_seeds(
+        fill_mask,
+        num_points,
+        rng_seed=derive_seed(rng_seed, 0),
+        density=density,
+        density_strength=density_strength,
+    )
     _step(1)
 
     if not seeds:
@@ -418,9 +479,17 @@ def create_region_map(
         empty = np.full(fill_mask.shape, -1, np.int32)
         return empty, [], start_index
 
-    seeds = lloyd_relaxation(fill_mask, seeds, iterations=config.LLOYD_ITERATIONS, step_fn=_step)
+    seeds = lloyd_relaxation(
+        fill_mask,
+        seeds,
+        rng_seed=derive_seed(rng_seed, 1),
+        iterations=config.LLOYD_ITERATIONS,
+        step_fn=_step,
+    )
 
-    pmap = assign_regions(fill_mask, seeds, start_index, jagged=jagged)
+    pmap = assign_regions(
+        fill_mask, seeds, start_index, jagged=jagged, rng_seed=derive_seed(rng_seed, 2)
+    )
     _step(1)
 
     metadata = _build_region_metadata(pmap, seeds, start_index, ptype, series, id_key, type_key)

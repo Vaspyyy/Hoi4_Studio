@@ -11,6 +11,7 @@ from .utils import (
     clear_used_colors,
     combine_maps,
     create_region_map,
+    derive_seed,
     extract_masks,
 )
 
@@ -40,6 +41,7 @@ def generate_territories(
     jagged_ocean: bool = False,
     land_count: int = 3000,
     ocean_count: int = 300,
+    seed: int | None = None,
     progress_fn: Callable[[int], None] | None = None,
 ) -> GenerationResult:
     clear_used_colors()
@@ -77,6 +79,7 @@ def generate_territories(
         density=density_arr,
         density_strength=density_strength,
         jagged=jagged_land,
+        rng_seed=derive_seed(seed, 0),
     )
 
     sea_density = None if exclude_ocean_density else density_arr
@@ -96,6 +99,7 @@ def generate_territories(
             density=sea_density,
             density_strength=sea_density_strength,
             jagged=jagged_ocean,
+            rng_seed=derive_seed(seed, 1),
         )
     else:
         sea_map = np.full((masks["map_h"], masks["map_w"]), -1, np.int32)

@@ -42,6 +42,19 @@ class TestWriteCountryDefinition:
         content = (paths.mod_root / "common/countries/ABC.txt").read_text()
         assert "graphical_culture" in content
 
+    def test_can_preserve_vanilla_definition_filename(self, tmp_path):
+        paths = _make_paths(tmp_path)
+
+        write_country_definition(
+            paths.mod_root,
+            "SOV",
+            (10, 80, 200),
+            definition_filename="Soviet Union.txt",
+        )
+
+        assert (paths.mod_root / "common/countries/Soviet Union.txt").is_file()
+        assert not (paths.mod_root / "common/countries/SOV.txt").exists()
+
 
 class TestWriteCountryHistory:
     def test_writes_history(self, tmp_path):
@@ -59,6 +72,8 @@ class TestWriteCountryHistory:
         content = files[0].read_text(encoding="utf-8")
         assert "capital = 1" in content
         assert "democratic = 60" in content
+        assert "recruit_character = ABC_leader_1" in content
+        assert "set_country_leader" not in content
 
     def test_sanitizes_name(self, tmp_path):
         paths = _make_paths(tmp_path)
@@ -96,6 +111,8 @@ class TestWriteCharacterFile:
         content = f.read_text(encoding="utf-8")
         assert "ABC_leader_1" in content
         assert "Leader Name" in content
+        assert "roles =" not in content
+        assert "country_leader = {" in content
 
 
 class TestCreateModStructure:

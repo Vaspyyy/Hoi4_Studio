@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import random
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,7 @@ from ..mapgen.province_generator import generate_provinces
 from ..mapgen.territory_generator import generate_territories
 from ..theme import AnimatedButton, create_card_widget, create_section_title
 from ..countries import generate_mod_descriptor
+from ..validator import LAUNCH_BLOCKING_CHECKS, validate_mod
 
 if TYPE_CHECKING:
     from ..main import MainWindow
@@ -47,7 +49,8 @@ Any other color counts as land. Save as <b>PNG</b>.</p>
 <p><b>3. (Optional) Add a boundary map</b>: black lines (#000000) on a white background<br>
 will act as hard borders between territories. The generator respects these edges.</p>
 
-<p><b>4. (Optional) Add a density map</b>: brighter areas attract more territories/provinces.<br>
+<p><b>4. (Optional) Add a density map</b>: <b>darker</b> areas attract more territories/provinces
+(black = densest, white = sparsest).<br>
 Or use the <b>Auto: Uniform</b> / <b>Auto: Equator</b> buttons to auto-generate one.</p>
 
 <p><b>5. Generate Territories</b>: this divides your map into large regions.<br>
@@ -59,13 +62,19 @@ Adjust the sliders and regenerate until the preview looks good.</p>
 <code>map/</code> and <code>localisation/</code> folders. This includes definition.csv,<br>
 provinces.bmp, terrain, adjacencies, strategic regions, supply areas, and more.</p>
 
-<p><b>8. Before Playing</b>: launch HOI4 in <b>debug mode</b>, open the <b>Nudger</b><br>
+<p><b>8. Add a starting country</b>: a custom map is not launchable until at least one<br>
+registered country has a definition, history, owned/cored state, and valid capital.<br>
+The post-export validator will block launch if this package is incomplete.</p>
+
+<p><b>9. Before Playing</b>: launch HOI4 in <b>debug mode</b>, open the <b>Nudger</b><br>
 from the main menu, select <b>Ports</b>, and click <b>Validate All States</b>.<br>
 Skipping this step will cause a crash when you click Start.</p>
 
 <p><b>Tip:</b> Iterate fast! Generate territories, tweak sliders, regenerate.<br>
 Only generate provinces when you're happy with the territory layout.</p>
 """
+
+MAP_REPLACE_PATHS = ["history/states", "map/strategicregions"]
 
 
 class MapGenWorker(QThread):
@@ -166,6 +175,9 @@ class MapGeneratorTab(QWidget):
 
         # province settings
         self._build_province_settings_section(layout)
+
+        # seed
+        self._build_seed_section(layout)
 
         # progress bar
         self.progress = QProgressBar()
@@ -568,9 +580,10 @@ class MapGeneratorTab(QWidget):
             mg_config.DENSITY_STRENGTH_MAX,
             mg_config.DENSITY_STRENGTH_DEFAULT,
             mg_config.DENSITY_STRENGTH_STEP,
-            "How strongly the density map influences province placement.\n"
+            "How strongly the density map influences territory AND province placement.\n"
             "0 = ignore density entirely (even spread).\n"
-            "10 = strongly cluster provinces in bright areas of the density map.",
+            f"{mg_config.DENSITY_STRENGTH_MAX} = strongly cluster regions in the "
+            "dark areas of the density map.",
         )
 
         self.prov_jagged_land = QCheckBox("Jagged Land")
@@ -616,6 +629,44 @@ class MapGeneratorTab(QWidget):
         form.addLayout(col3)
         form.addLayout(col4)
         layout.addLayout(form)
+
+    # ── seed ──────────────────────────────────────────────────────────
+
+    def _build_seed_section(self, layout: QVBoxLayout) -> None:
+        row = QHBoxLayout()
+
+        self.seed_enabled = QCheckBox("Use fixed seed")
+        self.seed_enabled.setToolTip(
+            "OFF: every generation is different.\n"
+            "ON: the same seed always reproduces the same map, so you can "
+            "regenerate a layout you liked or share it with someone else.\n\n"
+            "Note that the seed only reproduces a map for the same input images "
+            "and the same slider settings — changing either changes the result."
+        )
+        self.seed_value = QSpinBox()
+        self.seed_value.setRange(0, 2**31 - 1)
+        self.seed_value.setValue(mg_config.DEFAULT_SEED)
+        self.seed_value.setToolTip(self.seed_enabled.toolTip())
+        self.seed_value.setEnabled(False)
+
+        self.btn_seed_random = AnimatedButton("Randomize")
+        self.btn_seed_random.setToolTip("Pick a new random seed value.")
+        self.btn_seed_random.setEnabled(False)
+        self.btn_seed_random.clicked.connect(
+            lambda: self.seed_value.setValue(random.randint(0, 2**31 - 1))
+        )
+
+        self.seed_enabled.toggled.connect(self.seed_value.setEnabled)
+        self.seed_enabled.toggled.connect(self.btn_seed_random.setEnabled)
+
+        row.addWidget(self.seed_enabled)
+        row.addWidget(self.seed_value)
+        row.addWidget(self.btn_seed_random)
+        row.addStretch()
+        layout.addLayout(row)
+
+    def _current_seed(self) -> int | None:
+        return self.seed_value.value() if self.seed_enabled.isChecked() else None
 
     @staticmethod
     def _make_slider(
@@ -698,6 +749,7 @@ class MapGeneratorTab(QWidget):
             jagged_ocean=self.terr_jagged_ocean.isChecked(),
             land_count=self.terr_land_slider.value(),
             ocean_count=self.terr_ocean_slider.value(),
+            seed=self._current_seed(),
         )
         self._worker.progress.connect(self.progress.setValue)
         self._worker.finished.connect(self._on_territory_done)
@@ -719,6 +771,43 @@ class MapGeneratorTab(QWidget):
         self._update_step_highlight(1)
         self.mw.log_panel.log(f"Generated {len(result.metadata)} territories", "success")
 
+    def _confirm_province_counts(self) -> bool:
+        """Every territory gets at least one province, so asking for fewer provinces
+        than there are territories silently produces more than requested."""
+        assert self._territory_result is not None
+        meta = self._territory_result.metadata
+        checks = (
+            (
+                "land",
+                sum(1 for d in meta if d["territory_type"] == "land"),
+                self.prov_land_slider.value(),
+            ),
+            (
+                "ocean",
+                sum(1 for d in meta if d["territory_type"] == "ocean"),
+                self.prov_ocean_slider.value(),
+            ),
+        )
+        problems = [
+            f"{kind}: {requested} provinces requested, but there are {n_terr} "
+            f"{kind} territories — you will get at least {n_terr}."
+            for kind, n_terr, requested in checks
+            if n_terr > 0 and requested < n_terr
+        ]
+        if not problems:
+            return True
+
+        answer = QMessageBox.question(
+            self,
+            "Fewer Provinces Than Territories",
+            "\n\n".join(problems)
+            + "\n\nRaise the province counts, or lower the territory counts and "
+            "regenerate territories.\n\nGenerate anyway?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
     def _on_generate_provinces(self) -> None:
         if self._territory_result is None:
             QMessageBox.warning(
@@ -728,6 +817,9 @@ class MapGeneratorTab(QWidget):
             )
             return
         if self._worker is not None and self._worker.isRunning():
+            return
+
+        if not self._confirm_province_counts():
             return
 
         self.btn_gen_prov.setEnabled(False)
@@ -747,6 +839,7 @@ class MapGeneratorTab(QWidget):
             jagged_ocean=self.prov_jagged_ocean.isChecked(),
             land_count=self.prov_land_slider.value(),
             ocean_count=self.prov_ocean_slider.value(),
+            seed=self._current_seed(),
             terrain_image=self._terrain_image,
         )
         self._worker.progress.connect(self.progress.setValue)
@@ -836,6 +929,7 @@ class MapGeneratorTab(QWidget):
                     mod_root,
                     self.mw.paths.hoi4_user_mods,
                     mod_name,
+                    replace_paths=MAP_REPLACE_PATHS,
                     hoi4_install=self.mw.paths.hoi4_install,
                 )
                 mod_msg = f"\n\n.mod descriptor: {desc_path}"
@@ -852,20 +946,52 @@ class MapGeneratorTab(QWidget):
         except Exception:
             pass
 
+        # Export cleanup can restore vanilla country-tag fallback. Refresh all
+        # tag-backed dropdowns immediately so Nation Designer reflects it.
+        self.mw.refresh_all_tag_dropdowns()
+
+        validation_issues = []
+        if self.mw.paths:
+            try:
+                validation_issues = validate_mod(mod_root, self.mw.paths.hoi4_install)
+            except Exception as exc:
+                self.mw.log_panel.log(f"Post-export validation failed: {exc}", "error")
+                QMessageBox.critical(
+                    self,
+                    "Map Exported — Validation Failed",
+                    f"Map files were written, but Studio could not validate them:\n\n{exc}",
+                )
+                return
+
+        errors = [issue for issue in validation_issues if issue.severity == "error"]
+        launch_errors = [issue for issue in errors if issue.check in LAUNCH_BLOCKING_CHECKS]
+        if errors:
+            ordered = launch_errors + [issue for issue in errors if issue not in launch_errors]
+            details = "\n".join(f"• {issue.message}" for issue in ordered[:8])
+            if len(ordered) > 8:
+                details += f"\n• …and {len(ordered) - 8} more error(s) in the Validation tab."
+            self.mw.log_panel.log(
+                f"NOT LAUNCHABLE: post-export validation found {len(errors)} error(s)", "error"
+            )
+            QMessageBox.critical(
+                self,
+                "Map Exported — NOT LAUNCHABLE",
+                f"The map files were exported, but this mod is not ready to launch.\n\n"
+                f"{details}\n\nOpen the Validation tab for the full report.{mod_msg}",
+            )
+            return
+
         QMessageBox.information(
             self,
-            "Export Complete",
+            "Export Complete — Static Validation Passed",
             f"Map exported to your mod folder.\n\n"
             f"Files written: {len(results)}\n"
             f"Location: {mod_root}/map/\n\n"
-            f"Includes: provinces.bmp, definition.csv, terrain.bmp, "
-            f"adjacencies.csv, strategic regions, supply areas, "
-            f"buildings, localisation placeholders, and more."
-            f"{mod_msg}\n\n"
+            f"Static launchability validation passed.{mod_msg}\n\n"
             f"⚠ BEFORE PLAYING: Launch HOI4 in debug mode, open the Nudger\n"
             f"from the main menu, select 'Ports', click 'Validate All States'.\n"
-            f"Without this the game will crash on Start.\n\n"
-            f"Enable the mod in the Paradox launcher and restart HOI4.",
+            f"Without this the game may crash when starting a campaign.\n\n"
+            f"Enable only this map mod in the Paradox launcher and restart HOI4.",
         )
         self.mw.log_panel.log(
             "⚠ NUDGER PORTS: Before playing, use the HOI4 nudger tool (debug mode main menu) "

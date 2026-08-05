@@ -12,7 +12,6 @@ import csv
 import json
 import logging
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -83,27 +82,55 @@ def _build_indexed_bmp(
     return img
 
 
-def _copy_hoi4_base(mod_root: Path) -> None:
-    """Copy static common/events/decisions/localisation files into the mod.
+def _cleanup_legacy_hoi4_base(mod_root: Path) -> int:
+    """Remove obsolete Studio scaffold files without touching user edits.
 
-    These files come from RandomParadox's resources/hoi4/ and populate the
-    11 replace_path directories with game-compatible content so that
-    vanilla files aren't removed without replacement.
+    Older exports copied an unexpanded RandomParadox template pack directly
+    into live mod directories. Remove only files that are still byte-for-byte
+    identical to that bundled pack, plus the exact blank tag markers written
+    by the old exporter. Modified or user-created files are preserved.
     """
     base_dir = Path(__file__).resolve().parent.parent.parent / "resources" / "hoi4_base"
     if not base_dir.is_dir():
-        logger.warning("hoi4_base resource dir not found: %s", base_dir)
-        return
-    try:
-        shutil.copytree(
-            base_dir,
-            mod_root,
-            dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("*.md", ".gitkeep", "descriptor*.mod", "colourMappings*"),
-        )
-        logger.info("Copied hoi4_base static files to %s", mod_root)
-    except OSError as e:
-        logger.error("Failed to copy hoi4_base: %s", e)
+        return 0
+
+    removed = 0
+    for source in base_dir.rglob("*"):
+        if not source.is_file():
+            continue
+        relative = source.relative_to(base_dir)
+        destination = mod_root / relative
+        try:
+            if destination.is_file() and destination.read_bytes() == source.read_bytes():
+                destination.unlink()
+                removed += 1
+        except OSError as exc:
+            logger.warning("Could not remove obsolete scaffold file %s: %s", destination, exc)
+
+    tag_dir = mod_root / "common" / "country_tags"
+    blank_marker = "# HOI4 Studio override\n"
+    if tag_dir.is_dir():
+        for destination in tag_dir.glob("*.txt"):
+            try:
+                if destination.read_text(encoding="utf-8", errors="ignore") == blank_marker:
+                    destination.unlink()
+                    removed += 1
+            except OSError as exc:
+                logger.warning("Could not remove obsolete tag override %s: %s", destination, exc)
+
+    directories = sorted(
+        (path for path in base_dir.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for source_dir in directories:
+        destination = mod_root / source_dir.relative_to(base_dir)
+        try:
+            destination.rmdir()
+        except OSError:
+            pass
+    logger.info("Removed %d obsolete HOI4 Studio scaffold files from %s", removed, mod_root)
+    return removed
 
 
 def _province_image_to_array(province_image: Image.Image) -> np.ndarray:
@@ -1197,40 +1224,18 @@ def export_all_map_files(
     export_localisation_placeholders(province_data, territory_data, loc_dir)
     results["localisation/"] = "3 yml files"
 
-    # copy static common/events/decisions/localisation files from RandomParadox
-    # base ; these populate all 11 replace_path directories with game-compatible
-    # content so vanilla isn't removed without replacement
-    _copy_hoi4_base(mod_root)
-    results["hoi4_base/"] = "copied"
+    # Old Studio releases copied raw RandomParadox templates into live script
+    # directories and blanked vanilla tag registries. Both make HOI4 abort while
+    # loading. Clean only untouched legacy scaffold files; a map-only export
+    # must not silently opt into an incomplete total conversion.
+    removed_legacy = _cleanup_legacy_hoi4_base(mod_root)
+    results["legacy_scaffold_cleanup"] = f"removed {removed_legacy} obsolete files"
 
     # Directories that replace_path covers ; HOI4 skips vanilla
     # entirely for these, so no individual country/history override
     # files needed (that was generating 1,400+ empty txt files).
     for d in ("history/countries", "history/units", "common/countries"):
         (mod_root / d).mkdir(parents=True, exist_ok=True)
-
-    # common/country_tags/ is special ; we WANT blank overrides for
-    # vanilla's 00_countries.txt + zz_dynamic_countries.txt so no
-    # base-game tags sneak in.  replace_path handles directory
-    # suppression but blank tag files are a safety net the user
-    # expects to see on disk.  Only 2 files, not hundreds.
-    tag_dst = mod_root / "common/country_tags"
-    tag_dst.mkdir(parents=True, exist_ok=True)
-    if hoi4_install is not None:
-        tag_src = Path(hoi4_install) / "common" / "country_tags"
-        if tag_src.is_dir():
-            override = "# HOI4 Studio override\n"
-            for src_file in tag_src.glob("*.txt"):
-                dst_file = tag_dst / src_file.name
-                # only write if missing or smaller than expected
-                if not dst_file.exists() or dst_file.stat().st_size < len(override):
-                    dst_file.write_text(override, encoding="utf-8")
-    else:
-        # fallback: at least ensure the two standard files exist
-        for name in ("00_countries.txt", "zz_dynamic_countries.txt"):
-            f = tag_dst / name
-            if not f.exists():
-                f.write_text("# HOI4 Studio override\n", encoding="utf-8")
 
     # tutorial/tutorial.txt ; required by HOI4, even if empty
     (mod_root / "tutorial").mkdir(parents=True, exist_ok=True)

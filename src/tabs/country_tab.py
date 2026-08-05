@@ -25,9 +25,10 @@ from PySide6.QtWidgets import (
 from ..ideologies import parse_ideologies, resolve_sub_ideology_loc
 from ..theme import AnimatedButton, create_card_widget, create_section_title
 from ..tags import (
-    load_vanilla_tags,
+    ensure_effective_country_tag,
     load_all_tags,
-    add_country_tag,
+    load_vanilla_tag_mapping,
+    load_vanilla_tags,
     resolve_country_filename,
 )
 from ..countries import (
@@ -227,7 +228,8 @@ class CountryTab(QWidget):
         self.override_vanilla = QCheckBox("Override vanilla country")
         self.override_vanilla.setToolTip(
             "Write mod files that replace this vanilla country's definition.\n"
-            "Automatically checked when editing a vanilla tag."
+            "Automatically checked when editing a vanilla tag. If vanilla's tag registry\n"
+            "is masked, Studio writes a mod-side registration so the country remains usable."
         )
         layout.addWidget(self.override_vanilla)
 
@@ -585,7 +587,8 @@ class CountryTab(QWidget):
             return
         ValidationMixin.set_valid(self.tag, True)
 
-        is_vanilla = tag in load_vanilla_tags(self.mw.paths.hoi4_install)
+        vanilla_mapping = load_vanilla_tag_mapping(self.mw.paths.hoi4_install)
+        is_vanilla = tag in vanilla_mapping
         if is_vanilla and not self.override_vanilla.isChecked():
             result = QMessageBox.question(
                 self,
@@ -603,9 +606,19 @@ class CountryTab(QWidget):
             r, g, b = [int(x.strip()) for x in self.color_preview.text().split(",")]
             pops = {s._ideology: s.value() for s in self._ideo_sliders}
             create_mod_structure(self.mw.paths)
-            if not is_vanilla:
-                add_country_tag(self.mw.paths.mod_root, tag)
-            write_country_definition(self.mw.paths.mod_root, tag, (r, g, b))
+            country_path = vanilla_mapping.get(tag, f"countries/{tag}.txt")
+            write_country_definition(
+                self.mw.paths.mod_root,
+                tag,
+                (r, g, b),
+                definition_filename=Path(country_path).name,
+            )
+            registration_written = ensure_effective_country_tag(
+                self.mw.paths.hoi4_install,
+                self.mw.paths.mod_root,
+                tag,
+                country_path,
+            )
             from ..countries import _find_vanilla_history_name
 
             vanilla_hist_name = (
@@ -657,6 +670,12 @@ class CountryTab(QWidget):
                 vanilla_override=is_vanilla,
             )
 
+            if registration_written:
+                self.mw.log_panel.log(
+                    f"Registered {tag} in 00_generated_tags.txt because vanilla fallback "
+                    "is unavailable.",
+                    "info",
+                )
             self.mw.log_panel.log(f"Nation {tag} written to disk.", "success")
             self.mw.status_message(f"Nation {tag} written")
             self.mw.refresh_all_tag_dropdowns()

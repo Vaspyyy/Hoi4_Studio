@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..theme import AnimatedButton, create_card_widget, create_section_title
-from ..validator import validate_mod
+from ..validator import LAUNCH_BLOCKING_CHECKS, validate_mod
 
 if TYPE_CHECKING:
     from ..main import MainWindow
@@ -44,7 +44,8 @@ class ValidationTab(QWidget):
         layout.addWidget(create_section_title("Mod Validator", self))
 
         desc = QLabel(
-            "Scan your mod for broken references, missing localisation, syntax errors, and more."
+            "Run static linting, custom-map launchability checks, playset conflict checks, "
+            "and fresh HOI4 error-log attribution."
         )
         desc.setWordWrap(True)
         layout.addWidget(desc)
@@ -87,8 +88,19 @@ class ValidationTab(QWidget):
             errors = sum(1 for i in issues if i.severity == "error")
             warnings = sum(1 for i in issues if i.severity == "warning")
             infos = sum(1 for i in issues if i.severity == "info")
-            if not issues:
-                self.summary.setText("No issues found!")
+            launch_blockers = sum(
+                1
+                for issue in issues
+                if issue.severity == "error" and issue.check in LAUNCH_BLOCKING_CHECKS
+            )
+            if launch_blockers:
+                self.summary.setText(
+                    f"NOT LAUNCHABLE — {launch_blockers} launch blocker(s); "
+                    f"{errors} total error(s), {warnings} warning(s)"
+                )
+                self.summary.setStyleSheet("font-weight: 700; padding: 4px 0; color: #EF4444;")
+            elif not issues:
+                self.summary.setText("Static checks passed. Confirm with a clean HOI4 test launch.")
                 self.summary.setStyleSheet("font-weight: 600; padding: 4px 0; color: #22C55E;")
             else:
                 self.summary.setText(f"{errors} error(s), {warnings} warning(s), {infos} info")

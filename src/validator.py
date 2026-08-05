@@ -10,14 +10,17 @@ checks run across cores (ProcessPoolExecutor to bypass GIL).
 
 from __future__ import annotations
 
+import json
 import re
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from PIL import Image
+
 from .localisation import parse_english_localisation
 from .parser import extract_braced_block
-from .tags import load_mod_tags, load_vanilla_tags
+from .tags import load_effective_tag_mapping, load_mod_tags
 
 
 @dataclass
@@ -36,8 +39,13 @@ class ModData:
     txt_files: dict[str, str] = field(default_factory=dict)
     yml_raw: dict[str, bytes] = field(default_factory=dict)
     tags: set[str] = field(default_factory=set)
+    tag_mapping: dict[str, str] = field(default_factory=dict)
+    mod_tags: set[str] = field(default_factory=set)
     loc_keys: dict[str, str] = field(default_factory=dict)
     state_ids: set[int] = field(default_factory=set)
+    replace_paths: set[str] = field(default_factory=set)
+    has_custom_map: bool = False
+    latest_mtime: float = 0.0
 
 
 _TAG_RE = re.compile(r"\bowner\s*=\s*([A-Z0-9]{3})")
@@ -71,6 +79,37 @@ _IDEA_SKIP = frozenset(
 )
 _CHAR_DEF_RE = re.compile(r"\b([a-zA-Z0-9_]+)\s*=\s*\{")
 _TREE_ID_RE = re.compile(r"\bfocus_tree\s*=\s*\{\s*\n\s*\bid\s*=\s*(\S+)")
+_REPLACE_PATH_RE = re.compile(r'^\s*replace_path\s*=\s*"([^"]+)"', re.MULTILINE)
+_TEMPLATE_TOKEN_RE = re.compile(r"\btemplate[A-Z][A-Za-z0-9_]*\b")
+
+MAP_REQUIRED_FILES = (
+    "map/definition.csv",
+    "map/provinces.bmp",
+    "map/terrain.bmp",
+    "map/rivers.bmp",
+    "map/heightmap.bmp",
+    "map/trees.bmp",
+    "map/cities.bmp",
+    "map/world_normal.bmp",
+    "map/adjacencies.csv",
+    "map/continent.txt",
+)
+
+LAUNCH_BLOCKING_CHECKS = frozenset(
+    {
+        "launch_no_states",
+        "launch_no_country_tags",
+        "launch_empty_tag_registry",
+        "launch_no_state_owner",
+        "launch_no_playable_country",
+        "launch_other_map_mod",
+        "map_required_file",
+        "map_invalid_image",
+        "template_placeholder",
+        "character_roles_wrapper",
+        "game_log",
+    }
+)
 
 
 def _read_file(path: Path, base: Path, encoding: str = "utf-8") -> tuple[str, str]:
@@ -84,6 +123,25 @@ def _read_bytes(path: Path, base: Path) -> tuple[str, bytes]:
 
 def load_mod_data(mod_root: Path, hoi4_install: Path | None = None) -> ModData:
     data = ModData(mod_root=mod_root, hoi4_install=hoi4_install)
+
+    descriptor = mod_root / "descriptor.mod"
+    if descriptor.is_file():
+        descriptor_text = descriptor.read_text(encoding="utf-8", errors="ignore")
+        data.replace_paths = {
+            match.group(1).strip("/") for match in _REPLACE_PATH_RE.finditer(descriptor_text)
+        }
+    data.has_custom_map = any(
+        (mod_root / rel).is_file()
+        for rel in ("map/provinces.bmp", "map/definition.csv", "map/heightmap.bmp")
+    )
+
+    try:
+        data.latest_mtime = max(
+            (path.stat().st_mtime for path in mod_root.rglob("*") if path.is_file()),
+            default=0.0,
+        )
+    except OSError:
+        data.latest_mtime = 0.0
 
     txt_paths: list[Path] = []
     for d in ("common", "history", "events"):
@@ -106,17 +164,24 @@ def load_mod_data(mod_root: Path, hoi4_install: Path | None = None) -> ModData:
             rel, content = fut.result()
             data.yml_raw[rel] = content
 
-    data.tags = _collect_all_tags(mod_root, hoi4_install)
+    data.tag_mapping = load_effective_tag_mapping(hoi4_install, mod_root)
+    data.tags = set(data.tag_mapping)
+    data.mod_tags = set(load_mod_tags(mod_root))
     data.loc_keys = _collect_loc_keys(mod_root)
 
     state_paths: list[Path] = []
     state_dir = mod_root / "history" / "states"
+    mod_state_names: set[str] = set()
     if state_dir.is_dir():
-        state_paths.extend(state_dir.glob("*.txt"))
-    if hoi4_install:
+        mod_states = list(state_dir.glob("*.txt"))
+        state_paths.extend(mod_states)
+        mod_state_names = {path.name for path in mod_states}
+    if hoi4_install and "history/states" not in data.replace_paths:
         vanilla_states = hoi4_install / "history" / "states"
         if vanilla_states.is_dir():
-            state_paths.extend(vanilla_states.glob("*.txt"))
+            state_paths.extend(
+                path for path in vanilla_states.glob("*.txt") if path.name not in mod_state_names
+            )
     with ThreadPoolExecutor() as io_pool:
         for fut in {io_pool.submit(_read_file, p, p.parent.parent.parent): p for p in state_paths}:
             _, txt = fut.result()
@@ -129,14 +194,6 @@ def load_mod_data(mod_root: Path, hoi4_install: Path | None = None) -> ModData:
 def _collect_loc_keys(mod_root: Path) -> dict[str, str]:
     loc_dir = mod_root / "localisation" / "english"
     return parse_english_localisation(loc_dir)
-
-
-def _collect_all_tags(mod_root: Path, hoi4_install: Path | None) -> set[str]:
-    tags: set[str] = set()
-    if hoi4_install:
-        tags.update(load_vanilla_tags(hoi4_install))
-    tags.update(load_mod_tags(mod_root))
-    return tags
 
 
 def _state_files(data: ModData) -> dict[str, str]:
@@ -153,6 +210,397 @@ def _event_files(data: ModData) -> dict[str, str]:
 
 def _focus_files(data: ModData) -> dict[str, str]:
     return {k: v for k, v in data.txt_files.items() if k.startswith("common/national_focus/")}
+
+
+def _is_custom_map_profile(data: ModData) -> bool:
+    return data.has_custom_map or "history/states" in data.replace_paths
+
+
+def _state_records(data: ModData) -> dict[int, tuple[str | None, set[str], str]]:
+    records: dict[int, tuple[str | None, set[str], str]] = {}
+    for rel, txt in _state_files(data).items():
+        state_match = _STATE_ID_RE.search(txt)
+        if not state_match:
+            continue
+        owner_match = _TAG_RE.search(txt)
+        owner = owner_match.group(1) if owner_match else None
+        cores = {match.group(1) for match in _CORE_RE.finditer(txt)}
+        records[int(state_match.group(1))] = (owner, cores, rel)
+    return records
+
+
+def _country_history(data: ModData, tag: str) -> tuple[str, str] | None:
+    mod_dir = data.mod_root / "history" / "countries"
+    if mod_dir.is_dir():
+        for path in sorted(mod_dir.glob(f"{tag}*.txt")):
+            return str(path.relative_to(data.mod_root)), path.read_text(
+                encoding="utf-8", errors="ignore"
+            )
+    if data.hoi4_install and "history/countries" not in data.replace_paths:
+        vanilla_dir = data.hoi4_install / "history" / "countries"
+        if vanilla_dir.is_dir():
+            for path in sorted(vanilla_dir.glob(f"{tag}*.txt")):
+                return str(path), path.read_text(encoding="utf-8", errors="ignore")
+    return None
+
+
+def _country_definition_exists(data: ModData, tag: str) -> bool:
+    relative = data.tag_mapping.get(tag)
+    if not relative:
+        return False
+    filename = Path(relative).name
+    if (data.mod_root / "common" / "countries" / filename).is_file():
+        return True
+    return bool(
+        data.hoi4_install
+        and "common/countries" not in data.replace_paths
+        and (data.hoi4_install / "common" / "countries" / filename).is_file()
+    )
+
+
+def check_custom_map_launchability(data: ModData) -> list[Issue]:
+    """Require a coherent starting country for custom-map/TC projects."""
+    if not _is_custom_map_profile(data):
+        return []
+
+    issues: list[Issue] = []
+    state_records = _state_records(data)
+    if not state_records:
+        issues.append(
+            Issue(
+                "error",
+                "history/states",
+                0,
+                "launch_no_states",
+                "NOT LAUNCHABLE: custom map has no state history files.",
+            )
+        )
+
+    tag_dir = data.mod_root / "common" / "country_tags"
+    vanilla_tag_dir = data.hoi4_install / "common" / "country_tags" if data.hoi4_install else None
+    if tag_dir.is_dir():
+        for path in sorted(tag_dir.glob("*.txt")):
+            masks_vanilla = bool(vanilla_tag_dir and (vanilla_tag_dir / path.name).is_file())
+            has_definition = any(
+                _TAG_DEF_RE.match(line)
+                for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            )
+            if masks_vanilla and not has_definition:
+                if data.mod_tags:
+                    issues.append(
+                        Issue(
+                            "warning",
+                            str(path.relative_to(data.mod_root)),
+                            1,
+                            "tag_registry_mask",
+                            "This empty file masks HOI4's matching country-tag registry; "
+                            "only explicitly mod-registered tags remain available.",
+                        )
+                    )
+                else:
+                    issues.append(
+                        Issue(
+                            "error",
+                            str(path.relative_to(data.mod_root)),
+                            1,
+                            "launch_empty_tag_registry",
+                            "NOT LAUNCHABLE: this empty file masks HOI4's country-tag registry.",
+                        )
+                    )
+
+    if not data.tags:
+        issues.append(
+            Issue(
+                "error",
+                "common/country_tags",
+                0,
+                "launch_no_country_tags",
+                "NOT LAUNCHABLE: no effective country tags are registered.",
+            )
+        )
+
+    owner_tags = {owner for owner, _, _ in state_records.values() if owner}
+    if not owner_tags:
+        issues.append(
+            Issue(
+                "error",
+                "history/states",
+                0,
+                "launch_no_state_owner",
+                "NOT LAUNCHABLE: none of the generated states has an owner.",
+            )
+        )
+
+    playable_tags: list[str] = []
+    reasons: list[str] = []
+    for tag in sorted(owner_tags):
+        if tag not in data.tags:
+            reasons.append(f"{tag}: tag is not registered")
+            continue
+        if not _country_definition_exists(data, tag):
+            reasons.append(f"{tag}: country definition is missing")
+            continue
+        history = _country_history(data, tag)
+        if history is None:
+            reasons.append(f"{tag}: country history is missing")
+            continue
+        _, history_text = history
+        capital_match = _CAPITAL_RE.search(history_text)
+        if not capital_match:
+            reasons.append(f"{tag}: capital is missing")
+            continue
+        capital = int(capital_match.group(1))
+        state = state_records.get(capital)
+        if state is None:
+            reasons.append(f"{tag}: capital state {capital} does not exist in the custom map")
+            continue
+        owner, cores, _ = state
+        if owner != tag:
+            reasons.append(f"{tag}: capital state {capital} is not owned by the country")
+            continue
+        if tag not in cores:
+            reasons.append(f"{tag}: capital state {capital} is not a core")
+            continue
+        playable_tags.append(tag)
+
+    if not playable_tags:
+        detail = "; ".join(reasons[:4])
+        suffix = f" Details: {detail}." if detail else ""
+        issues.append(
+            Issue(
+                "error",
+                "history/countries",
+                0,
+                "launch_no_playable_country",
+                "NOT LAUNCHABLE: custom map has no coherent starting country with a definition, "
+                f"history, owned/cored state, and valid capital.{suffix}",
+            )
+        )
+    return issues
+
+
+def check_map_files(data: ModData) -> list[Issue]:
+    if not data.has_custom_map:
+        return []
+    issues: list[Issue] = []
+    for rel in MAP_REQUIRED_FILES:
+        path = data.mod_root / rel
+        if not path.is_file() or path.stat().st_size == 0:
+            issues.append(
+                Issue(
+                    "error",
+                    rel,
+                    0,
+                    "map_required_file",
+                    f"NOT LAUNCHABLE: required custom-map file {rel} is missing or empty.",
+                )
+            )
+    for rel in (
+        "map/provinces.bmp",
+        "map/terrain.bmp",
+        "map/rivers.bmp",
+        "map/heightmap.bmp",
+        "map/trees.bmp",
+        "map/cities.bmp",
+        "map/world_normal.bmp",
+    ):
+        path = data.mod_root / rel
+        if not path.is_file() or path.stat().st_size == 0:
+            continue
+        try:
+            with Image.open(path) as image:
+                image.verify()
+        except Exception as exc:
+            issues.append(
+                Issue(
+                    "error",
+                    rel,
+                    0,
+                    "map_invalid_image",
+                    f"NOT LAUNCHABLE: {rel} is not a readable image ({exc}).",
+                )
+            )
+    strategic = data.mod_root / "map" / "strategicregions"
+    if not strategic.is_dir() or not any(strategic.glob("*.txt")):
+        issues.append(
+            Issue(
+                "error",
+                "map/strategicregions",
+                0,
+                "map_required_file",
+                "NOT LAUNCHABLE: custom map has no strategic-region files.",
+            )
+        )
+    return issues
+
+
+def check_template_placeholders(data: ModData) -> list[Issue]:
+    issues: list[Issue] = []
+    for rel, txt in sorted(data.txt_files.items()):
+        matches = list(_TEMPLATE_TOKEN_RE.finditer(txt))
+        if not matches:
+            continue
+        tokens = sorted({match.group(0) for match in matches})
+        first = matches[0]
+        issues.append(
+            Issue(
+                "error",
+                rel,
+                txt[: first.start()].count("\n") + 1,
+                "template_placeholder",
+                "NOT LAUNCHABLE: unexpanded template token(s): " + ", ".join(tokens[:5]),
+            )
+        )
+    return issues
+
+
+def check_character_shapes(data: ModData) -> list[Issue]:
+    issues: list[Issue] = []
+    for rel, txt in sorted(data.txt_files.items()):
+        if not rel.startswith("common/characters/"):
+            continue
+        match = re.search(r"^\s*roles\s*=", txt, re.MULTILINE)
+        if not match:
+            continue
+        issues.append(
+            Issue(
+                "error",
+                rel,
+                txt[: match.start()].count("\n") + 1,
+                "character_roles_wrapper",
+                "NOT LAUNCHABLE: character roles must be direct country_leader, advisor, "
+                "or commander blocks; HOI4 rejects the roles = { ... } wrapper.",
+            )
+        )
+    return issues
+
+
+def _game_data_dir(hoi4_install: Path | None) -> Path | None:
+    if hoi4_install is None:
+        return None
+    settings = hoi4_install / "launcher-settings.json"
+    if not settings.is_file():
+        return None
+    try:
+        raw = json.loads(settings.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    configured = raw.get("gameDataPath")
+    if not isinstance(configured, str) or not configured:
+        return None
+    configured = configured.replace(
+        "$LINUX_DATA_HOME", str(Path.home() / ".local" / "share")
+    ).replace("$HOME", str(Path.home()))
+    return Path(configured).expanduser()
+
+
+def check_enabled_map_mods(data: ModData) -> list[Issue]:
+    if not data.has_custom_map:
+        return []
+    game_data = _game_data_dir(data.hoi4_install)
+    if game_data is None:
+        return []
+    load_order = game_data / "dlc_load.json"
+    if not load_order.is_file():
+        return []
+    try:
+        enabled = json.loads(load_order.read_text(encoding="utf-8")).get("enabled_mods", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    conflicts: list[str] = []
+    for relative in enabled:
+        if not isinstance(relative, str):
+            continue
+        descriptor = game_data / relative
+        if not descriptor.is_file():
+            continue
+        text = descriptor.read_text(encoding="utf-8", errors="ignore")
+        path_match = re.search(r'^\s*path\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        mod_path = Path(path_match.group(1)).expanduser() if path_match else None
+        try:
+            if mod_path and mod_path.resolve() == data.mod_root.resolve():
+                continue
+        except OSError:
+            pass
+        is_map_mod = bool(
+            re.search(
+                r'^\s*replace_path\s*=\s*"map(?:/strategicregions)?"',
+                text,
+                re.MULTILINE,
+            )
+        )
+        if mod_path and any(
+            (mod_path / relative).is_file()
+            for relative in ("map/provinces.bmp", "map/definition.csv")
+        ):
+            is_map_mod = True
+        if not is_map_mod:
+            continue
+        name_match = re.search(r'^\s*name\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        conflicts.append(name_match.group(1) if name_match else descriptor.stem)
+
+    if not conflicts:
+        return []
+    return [
+        Issue(
+            "error",
+            str(load_order),
+            0,
+            "launch_other_map_mod",
+            "NOT LAUNCHABLE SAFELY: another map mod is enabled in the current playset: "
+            + ", ".join(sorted(conflicts)),
+        )
+    ]
+
+
+def check_fresh_game_log(data: ModData) -> list[Issue]:
+    game_data = _game_data_dir(data.hoi4_install)
+    if game_data is None:
+        return []
+    error_log = game_data / "logs" / "error.log"
+    if not error_log.is_file():
+        return []
+    try:
+        if error_log.stat().st_mtime + 1 < data.latest_mtime:
+            return []
+        lines = error_log.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return []
+
+    file_ref_re = re.compile(r'(?:in\s+)?file:\s*"([^"]+)"', re.IGNORECASE)
+    owned: list[tuple[int, str, str]] = []
+    for line_number, line in enumerate(lines, 1):
+        match = file_ref_re.search(line)
+        if not match:
+            continue
+        raw_path = match.group(1).replace("\\", "/")
+        candidate = Path(raw_path)
+        if candidate.is_absolute():
+            try:
+                relative = candidate.resolve().relative_to(data.mod_root.resolve())
+            except (OSError, ValueError):
+                continue
+        else:
+            relative = candidate
+        if (data.mod_root / relative).is_file():
+            owned.append((line_number, str(relative), line.strip()))
+
+    if not owned:
+        return []
+    first_line, first_file, first_message = owned[0]
+    if len(first_message) > 240:
+        first_message = first_message[:237] + "..."
+    return [
+        Issue(
+            "error" if _is_custom_map_profile(data) else "warning",
+            str(error_log),
+            first_line,
+            "game_log",
+            f"Latest HOI4 launch produced {len(owned)} error-log entries in files owned by "
+            f"this mod. First ({first_file}): {first_message}",
+        )
+    ]
 
 
 def check_tag_definitions(data: ModData) -> list[Issue]:
@@ -182,29 +630,47 @@ def check_tag_definitions(data: ModData) -> list[Issue]:
 
 def check_state_owners(data: ModData) -> list[Issue]:
     issues: list[Issue] = []
+    unknown_owners: dict[str, tuple[str, int, int]] = {}
+    unknown_cores: dict[str, tuple[str, int, int]] = {}
     for rel, txt in _state_files(data).items():
         for m in _TAG_RE.finditer(txt):
             if m.group(1) not in data.tags:
-                issues.append(
-                    Issue(
-                        "error",
-                        rel,
-                        txt[: m.start()].count("\n") + 1,
-                        "state_owner",
-                        f"Owner tag {m.group(1)} is not registered",
-                    )
+                tag = m.group(1)
+                prior = unknown_owners.get(tag)
+                unknown_owners[tag] = (
+                    prior[0] if prior else rel,
+                    prior[1] if prior else txt[: m.start()].count("\n") + 1,
+                    (prior[2] if prior else 0) + 1,
                 )
         for m in _CORE_RE.finditer(txt):
             if m.group(1) not in data.tags:
-                issues.append(
-                    Issue(
-                        "error",
-                        rel,
-                        txt[: m.start()].count("\n") + 1,
-                        "state_core",
-                        f"Core tag {m.group(1)} is not registered",
-                    )
+                tag = m.group(1)
+                prior = unknown_cores.get(tag)
+                unknown_cores[tag] = (
+                    prior[0] if prior else rel,
+                    prior[1] if prior else txt[: m.start()].count("\n") + 1,
+                    (prior[2] if prior else 0) + 1,
                 )
+    for tag, (rel, line, count) in sorted(unknown_owners.items()):
+        issues.append(
+            Issue(
+                "error",
+                rel,
+                line,
+                "state_owner",
+                f"Owner tag {tag} is not registered (used by {count} state(s))",
+            )
+        )
+    for tag, (rel, line, count) in sorted(unknown_cores.items()):
+        issues.append(
+            Issue(
+                "error",
+                rel,
+                line,
+                "state_core",
+                f"Core tag {tag} is not registered (used by {count} state(s))",
+            )
+        )
     return issues
 
 
@@ -547,6 +1013,12 @@ def check_focus_cycles(data: ModData) -> list[Issue]:
 
 
 ALL_CHECKS = [
+    check_custom_map_launchability,
+    check_map_files,
+    check_template_placeholders,
+    check_character_shapes,
+    check_enabled_map_mods,
+    check_fresh_game_log,
     check_tag_definitions,
     check_state_owners,
     check_capital_refs,

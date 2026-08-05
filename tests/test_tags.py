@@ -1,4 +1,10 @@
-from src.tags import load_mod_tags, add_country_tag, load_vanilla_tags
+from src.tags import (
+    add_country_tag,
+    ensure_effective_country_tag,
+    load_effective_tag_mapping,
+    load_mod_tags,
+    load_vanilla_tags,
+)
 
 
 class TestAddCountryTag:
@@ -15,6 +21,39 @@ class TestAddCountryTag:
         content = (tmp_path / "common/country_tags/00_generated_tags.txt").read_text()
         lines = [line for line in content.strip().splitlines() if line.strip()]
         assert len(lines) == 1
+
+    def test_preserves_explicit_country_definition_path(self, tmp_path):
+        add_country_tag(tmp_path, "SOV", "countries/Soviet Union.txt")
+
+        content = (tmp_path / "common/country_tags/00_generated_tags.txt").read_text()
+        assert 'SOV = "countries/Soviet Union.txt"' in content
+
+    def test_repairs_vanilla_tag_when_registry_is_masked(self, tmp_path):
+        hoi4 = tmp_path / "hoi4"
+        mod = tmp_path / "mod"
+        vanilla_tags = hoi4 / "common/country_tags/00_countries.txt"
+        vanilla_tags.parent.mkdir(parents=True)
+        vanilla_tags.write_text('USA = "countries/USA.txt"\n')
+        masked_tags = mod / "common/country_tags/00_countries.txt"
+        masked_tags.parent.mkdir(parents=True)
+        masked_tags.write_text("# HOI4 Studio override\n")
+
+        written = ensure_effective_country_tag(hoi4, mod, "USA", "countries/USA.txt")
+
+        assert written is True
+        assert load_effective_tag_mapping(hoi4, mod)["USA"] == "countries/USA.txt"
+
+    def test_does_not_duplicate_available_vanilla_tag(self, tmp_path):
+        hoi4 = tmp_path / "hoi4"
+        mod = tmp_path / "mod"
+        vanilla_tags = hoi4 / "common/country_tags/00_countries.txt"
+        vanilla_tags.parent.mkdir(parents=True)
+        vanilla_tags.write_text('USA = "countries/USA.txt"\n')
+
+        written = ensure_effective_country_tag(hoi4, mod, "USA", "countries/USA.txt")
+
+        assert written is False
+        assert not (mod / "common/country_tags/00_generated_tags.txt").exists()
 
 
 class TestLoadModTags:

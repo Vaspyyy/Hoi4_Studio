@@ -54,12 +54,21 @@ from PySide6.QtWidgets import (
 )
 
 from ..parser import parse_pdx
+from ..tags import load_effective_tag_mapping
 from ..theme import AnimatedButton, create_card_widget, create_section_title
 
 if TYPE_CHECKING:
     from ..main import MainWindow
 
 _logger = logging.getLogger("hoi4_studio.world_map")
+
+
+def _classify_owner_tags(
+    state_owner: dict[int, str], registered_tags: set[str]
+) -> tuple[set[str], set[str]]:
+    """Split state owner references into effective and unregistered tags."""
+    owner_tags = {tag for tag in state_owner.values() if tag}
+    return owner_tags & registered_tags, owner_tags - registered_tags
 
 
 def _arr_to_qimage(arr: np.ndarray) -> QImage:
@@ -1632,10 +1641,13 @@ class CountryLegendWidget(QWidget):
     def update_legend(
         self,
         country_colors: dict[str, tuple[int, int, int]],
-        detected_tags: set[str],
+        registered_owner_tags: set[str],
+        unregistered_owner_tags: set[str],
         num_unassigned: int = 0,
     ) -> None:
-        header_text = f"Countries ({len(detected_tags)})"
+        header_text = f"Registered owners ({len(registered_owner_tags)})"
+        if unregistered_owner_tags:
+            header_text += f" + {len(unregistered_owner_tags)} Unregistered"
         if num_unassigned > 0:
             header_text += f" + {num_unassigned} Unassigned"
 
@@ -1646,7 +1658,7 @@ class CountryLegendWidget(QWidget):
         else:
             self._header.setText(header_text)
 
-        sorted_tags = sorted(detected_tags)
+        sorted_tags = sorted(registered_owner_tags) + sorted(unregistered_owner_tags)
 
         while len(self._rows) < len(sorted_tags):
             row, swatch, name = self._make_row()
@@ -1660,7 +1672,14 @@ class CountryLegendWidget(QWidget):
             self._row_swatches[i].setStyleSheet(
                 f"background-color: rgb({r},{g},{b}); border: 1px solid {self._border_color}; border-radius: 3px;"
             )
-            self._row_names[i].setText(tag)
+            if tag in unregistered_owner_tags:
+                self._row_names[i].setText(f"{tag} — UNREGISTERED")
+                self._row_names[i].setStyleSheet(
+                    f"{self._name_stylesheet} color: #EF4444; font-weight: 700;"
+                )
+            else:
+                self._row_names[i].setText(tag)
+                self._row_names[i].setStyleSheet(self._name_stylesheet)
             if row.parent() is None:
                 self._layout.insertWidget(i + 1, row)
             row.show()
@@ -1862,7 +1881,15 @@ class WorldMapTab(QWidget):
 
     def _load_country_colors(self) -> dict[str, tuple[int, int, int]]:
         colors: dict[str, tuple[int, int, int]] = {}
-        mod_has_overrides = False
+
+        # Color data and tag registration are separate concerns. Keep vanilla
+        # colors available for rendering owner references, then let mod colors
+        # override them. Registration is classified with the effective VFS tag
+        # mapping in _on_render_finished().
+        if self.mw.paths and self.mw.paths.hoi4_install:
+            vanilla_tags = self.mw.paths.hoi4_install / "common" / "country_tags"
+            vanilla_countries = self.mw.paths.hoi4_install / "common" / "countries"
+            colors.update(_parse_country_colors(vanilla_tags, vanilla_countries))
 
         if self.mw.paths and self.mw.paths.mod_root:
             mod_tags = self.mw.paths.mod_root / "common" / "country_tags"
@@ -1870,14 +1897,6 @@ class WorldMapTab(QWidget):
             colors.update(_parse_country_colors(mod_tags, mod_countries))
             if not mod_tags.is_dir():
                 colors.update(_parse_country_colors(Path("."), mod_countries))
-            # if the mod has country_tags with override files (even empty),
-            # skip vanilla colors ; the mod intentionally blanks them out
-            mod_has_overrides = mod_tags.is_dir() and any(mod_tags.iterdir())
-
-        if self.mw.paths and self.mw.paths.hoi4_install and not mod_has_overrides:
-            vanilla_tags = self.mw.paths.hoi4_install / "common" / "country_tags"
-            vanilla_countries = self.mw.paths.hoi4_install / "common" / "countries"
-            colors.update(_parse_country_colors(vanilla_tags, vanilla_countries))
 
         self._country_colors = colors
         return colors
@@ -2044,7 +2063,7 @@ class WorldMapTab(QWidget):
 
         self.map_view.set_images(qimg_clean, qimg_bordered)
 
-        detected_tags: set[str] = set()
+        state_owner: dict[int, str] = {}
         if self._worker is not None:
             if self._worker.provinces_arr is not None:
                 self.map_view.set_map_data(
@@ -2068,7 +2087,7 @@ class WorldMapTab(QWidget):
                     self._worker.bordered_arr,
                     self._worker.rivers_mask,
                 )
-            detected_tags = set(self._worker.state_owner.values())
+            state_owner = self._worker.state_owner
 
             c = self._cache
             fps = getattr(self, "_last_render_fps", {})
@@ -2098,29 +2117,49 @@ class WorldMapTab(QWidget):
             if self._worker._border_mask_result is not None:
                 c.border_mask = self._worker._border_mask_result
 
+        hoi4_install = self.mw.paths.hoi4_install if self.mw.paths else None
+        mod_root = self.mw.paths.mod_root if self.mw.paths else None
+        registered_tags = set(load_effective_tag_mapping(hoi4_install, mod_root))
+        registered_owners, unregistered_owners = _classify_owner_tags(state_owner, registered_tags)
+        owner_tags = registered_owners | unregistered_owners
+
         self.legend.update_legend(
             getattr(
                 self._worker,
                 "resolved_colors",
-                _resolve_colors(self._country_colors, detected_tags),
+                _resolve_colors(self._country_colors, owner_tags),
             ),
-            detected_tags,
+            registered_owners,
+            unregistered_owners,
             num_unassigned=num_unassigned,
         )
 
         unassigned = f", {num_unassigned} unassigned" if num_unassigned > 0 else ""
+        invalid = ""
+        if unregistered_owners:
+            tags = ", ".join(sorted(unregistered_owners))
+            invalid = f", {len(unregistered_owners)} unregistered owner tag(s): {tags}"
         self.status_label.setText(
-            f"{num_states} states rendered, {num_countries} countries detected{unassigned}"
+            f"{num_states} states rendered, {len(registered_owners)} registered owner "
+            f"countries{invalid}{unassigned}"
         )
 
         self.btn_refresh.setEnabled(True)
         self.progress.setVisible(False)
         self._worker = None
 
-        self.mw.log_panel.log(
-            f"World map rendered: {num_states} states, {num_countries} countries",
-            "success",
-        )
+        if unregistered_owners:
+            self.mw.log_panel.log(
+                "World map contains unregistered state owner tag(s): "
+                + ", ".join(sorted(unregistered_owners)),
+                "warning",
+            )
+        else:
+            self.mw.log_panel.log(
+                f"World map rendered: {num_states} states, "
+                f"{len(registered_owners)} registered owner countries",
+                "success",
+            )
 
     def _on_render_error(self, msg: str) -> None:
         self._fake_timer.stop()

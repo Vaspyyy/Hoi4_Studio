@@ -35,8 +35,14 @@ def create_mod_structure(paths: HOI4Paths) -> None:
         (paths.mod_root / d).mkdir(parents=True, exist_ok=True)
 
 
-def write_country_definition(mod_root: Path, tag: str, color: Tuple[int, int, int]) -> None:
-    p = mod_root / f"common/countries/{tag}.txt"
+def write_country_definition(
+    mod_root: Path,
+    tag: str,
+    color: Tuple[int, int, int],
+    definition_filename: str | None = None,
+) -> None:
+    filename = definition_filename or f"{tag}.txt"
+    p = mod_root / "common" / "countries" / filename
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
         "graphical_culture = western_european_gfx\ngraphical_culture_2d = western_european_2d\n",
@@ -143,10 +149,6 @@ set_politics = {{
  last_election = "1936.1.1"
  elections_allowed = {elections_allowed}
 }}
-
-set_country_leader = {{
-  character = {leader_id}
- }}
 {ideas_block}"""
     p.write_text(txt, encoding="utf-8")
 
@@ -228,8 +230,6 @@ def write_character_file(
     txt = f"""characters = {{
  {character_id} = {{
   name = "{leader_name}"
-
-  roles = {{ country_leader }}
 
   portraits = {{
    civilian = {{

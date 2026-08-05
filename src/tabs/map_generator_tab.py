@@ -62,7 +62,11 @@ Adjust the sliders and regenerate until the preview looks good.</p>
 <code>map/</code> and <code>localisation/</code> folders. This includes definition.csv,<br>
 provinces.bmp, terrain, adjacencies, strategic regions, supply areas, and more.</p>
 
-<p><b>8. Before Playing</b>: launch HOI4 in <b>debug mode</b>, open the <b>Nudger</b><br>
+<p><b>8. Add a starting country</b>: a custom map is not launchable until at least one<br>
+registered country has a definition, history, owned/cored state, and valid capital.<br>
+The post-export validator will block launch if this package is incomplete.</p>
+
+<p><b>9. Before Playing</b>: launch HOI4 in <b>debug mode</b>, open the <b>Nudger</b><br>
 from the main menu, select <b>Ports</b>, and click <b>Validate All States</b>.<br>
 Skipping this step will cause a crash when you click Start.</p>
 
@@ -773,10 +777,16 @@ class MapGeneratorTab(QWidget):
         assert self._territory_result is not None
         meta = self._territory_result.metadata
         checks = (
-            ("land", sum(1 for d in meta if d["territory_type"] == "land"),
-             self.prov_land_slider.value()),
-            ("ocean", sum(1 for d in meta if d["territory_type"] == "ocean"),
-             self.prov_ocean_slider.value()),
+            (
+                "land",
+                sum(1 for d in meta if d["territory_type"] == "land"),
+                self.prov_land_slider.value(),
+            ),
+            (
+                "ocean",
+                sum(1 for d in meta if d["territory_type"] == "ocean"),
+                self.prov_ocean_slider.value(),
+            ),
         )
         problems = [
             f"{kind}: {requested} provinces requested, but there are {n_terr} "
@@ -935,6 +945,10 @@ class MapGeneratorTab(QWidget):
                 world_map.invalidate()
         except Exception:
             pass
+
+        # Export cleanup can restore vanilla country-tag fallback. Refresh all
+        # tag-backed dropdowns immediately so Nation Designer reflects it.
+        self.mw.refresh_all_tag_dropdowns()
 
         validation_issues = []
         if self.mw.paths:

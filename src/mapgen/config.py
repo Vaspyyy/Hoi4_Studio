@@ -10,15 +10,19 @@ OCEAN_PROVINCES_DEFAULT = 300
 OCEAN_PROVINCES_TICK = 20
 OCEAN_PROVINCES_STEP = 10
 
+# Territories become states and strategic regions; provinces subdivide them.
+# Defaults keep roughly a 10:1 province-to-territory ratio so the province step
+# actually subdivides something — matching them 1:1 makes it a no-op.
+# (Vanilla HOI4 is ~13,000 provinces across ~1,000 states.)
 LAND_TERRITORIES_MIN = 100
 LAND_TERRITORIES_MAX = 10000
-LAND_TERRITORIES_DEFAULT = 3000
+LAND_TERRITORIES_DEFAULT = 300
 LAND_TERRITORIES_TICK = 200
 LAND_TERRITORIES_STEP = 100
 
 OCEAN_TERRITORIES_MIN = 10
 OCEAN_TERRITORIES_MAX = 1000
-OCEAN_TERRITORIES_DEFAULT = 300
+OCEAN_TERRITORIES_DEFAULT = 30
 OCEAN_TERRITORIES_TICK = 20
 OCEAN_TERRITORIES_STEP = 10
 
@@ -30,6 +34,9 @@ MAX_IMAGE_PIXELS = 300000000
 
 LLOYD_ITERATIONS = 4
 JAGGED_BORDER_AMPLITUDE = 0.12
+
+# Seeding is opt-in; when off, generation stays random on every run.
+DEFAULT_SEED = 1
 
 DEFAULT_DENSITY_GREY = 128
 DENSITY_STRENGTH_DEFAULT = 20

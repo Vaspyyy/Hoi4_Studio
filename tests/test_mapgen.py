@@ -37,6 +37,7 @@ from src.mapgen.utils import (
     _remove_enclaves,
     clear_used_colors,
     color_from_id,
+    derive_seed,
     extract_masks,
     random_seeds,
 )
@@ -147,13 +148,13 @@ def _make_lake_image(w: int = 100, h: int = 100) -> Image.Image:
 
 
 def _gen_territories(land_image: Image.Image | None = None, **kw):
-    params = dict(land_count=4, ocean_count=2)
+    params: dict = dict(land_count=4, ocean_count=2)
     params.update(kw)
     return generate_territories(land_image or _make_land_image(), None, None, **params)
 
 
 def _gen_provinces(terr, **kw):
-    params = dict(land_count=12, ocean_count=6)
+    params: dict = dict(land_count=12, ocean_count=6)
     params.update(kw)
     return generate_provinces(terr.pmap, terr.metadata, terr.masks, None, **params)
 
@@ -292,6 +293,44 @@ class TestGenerateProvinces:
         )
         assert seen and seen[-1] == 100
         assert all(0 <= p <= 100 for p in seen)
+
+
+class TestSeeding:
+    def test_same_seed_reproduces_territories(self) -> None:
+        a = _gen_territories(seed=1234)
+        b = _gen_territories(seed=1234)
+        assert np.array_equal(a.pmap, b.pmap)
+
+    def test_same_seed_reproduces_provinces(self) -> None:
+        a = _gen_provinces(_gen_territories(seed=7), seed=7)
+        b = _gen_provinces(_gen_territories(seed=7), seed=7)
+        assert np.array_equal(a.pmap, b.pmap)
+        assert [m["x"] for m in a.metadata] == [m["x"] for m in b.metadata]
+
+    def test_same_seed_reproduces_jagged_borders(self) -> None:
+        kw = dict(jagged_land=True, jagged_ocean=True)
+        a = _gen_territories(seed=99, **kw)
+        b = _gen_territories(seed=99, **kw)
+        assert np.array_equal(a.pmap, b.pmap)
+
+    def test_different_seeds_differ(self) -> None:
+        a = _gen_territories(seed=1)
+        b = _gen_territories(seed=2)
+        assert not np.array_equal(a.pmap, b.pmap)
+
+    def test_no_seed_stays_random(self) -> None:
+        a = _gen_territories()
+        b = _gen_territories()
+        assert not np.array_equal(a.pmap, b.pmap)
+
+    def test_derive_seed_is_stable_and_separated(self) -> None:
+        assert derive_seed(5, 0) == derive_seed(5, 0)
+        assert derive_seed(5, 0) != derive_seed(5, 1)
+        assert derive_seed(5, 0) != derive_seed(6, 0)
+
+    def test_derive_seed_passes_through_none(self) -> None:
+        assert derive_seed(None, 0) is None
+        assert derive_seed(None, 3, 4) is None
 
 
 class TestRemoveEnclaves:

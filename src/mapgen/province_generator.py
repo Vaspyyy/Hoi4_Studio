@@ -13,6 +13,7 @@ from .utils import (
     clear_used_colors,
     color_from_id,
     create_region_map,
+    derive_seed,
 )
 
 
@@ -28,6 +29,7 @@ def generate_provinces(
     jagged_ocean: bool = False,
     land_count: int = 3000,
     ocean_count: int = 300,
+    seed: int | None = None,
     terrain_image: Image.Image | None = None,
     progress_fn: Callable[[int], None] | None = None,
 ) -> GenerationResult:
@@ -185,6 +187,9 @@ def generate_provinces(
             density=terr_density,
             density_strength=terr_density_strength,
             jagged=jagged,
+            # keyed on the territory, so a territory subdivides identically
+            # regardless of what order the territories are processed in
+            rng_seed=derive_seed(seed, terr_index),
         )
 
         # Centroids come back in crop-local coordinates.

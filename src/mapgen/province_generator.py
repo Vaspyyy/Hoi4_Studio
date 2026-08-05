@@ -4,7 +4,7 @@ from typing import Callable
 
 import numpy as np
 from PIL import Image
-from scipy.ndimage import label as ndlabel
+from scipy.ndimage import find_objects, label as ndlabel
 
 from . import config
 from .numb_gen import NumberSeries
@@ -33,7 +33,8 @@ def generate_provinces(
 ) -> GenerationResult:
     clear_used_colors()
 
-    density_arr = np.array(density_image) if density_image is not None else None
+    # Force greyscale: the weighting math downstream assumes a single channel.
+    density_arr = np.array(density_image.convert("L")) if density_image is not None else None
     map_h, map_w = masks["map_h"], masks["map_w"]
 
     land_terrs = [d for d in territory_data if d["territory_type"] == "land"]
@@ -44,17 +45,36 @@ def generate_provinces(
         for d in ocean_terrs:
             ocean_terr_indices.add(d["_pmap_index"])
 
-    unique, counts = np.unique(territory_pmap[territory_pmap >= 0], return_counts=True)
-    pixel_counts = dict(zip(unique.tolist(), counts.tolist()))
+    if density_arr is not None and density_arr.shape != territory_pmap.shape:
+        raise ValueError(
+            f"Density map is {density_arr.shape[1]}x{density_arr.shape[0]} but the map is "
+            f"{territory_pmap.shape[1]}x{territory_pmap.shape[0]}. They must match."
+        )
 
-    density_weights: dict[int, float] = {}
-    for idx in unique:
-        if int(idx) in ocean_terr_indices:
-            density_weights[int(idx)] = 1.0
-        else:
-            terr_mask = territory_pmap == idx
-            mean_val = density_arr[terr_mask].mean() if density_arr is not None else 128.0
-            density_weights[int(idx)] = (256.0 - mean_val) ** density_strength
+    # Per-territory pixel counts and mean density in two bincount passes, rather
+    # than one full-image boolean mask per territory.
+    flat = territory_pmap.ravel()
+    keep = flat >= 0
+    flat_valid = flat[keep]
+    n_indices = int(flat_valid.max()) + 1 if flat_valid.size else 0
+    counts = np.bincount(flat_valid, minlength=n_indices)
+    unique = np.flatnonzero(counts)
+    pixel_counts = {int(i): int(counts[i]) for i in unique}
+
+    grey = float(config.DEFAULT_DENSITY_GREY)
+    if density_arr is not None:
+        sums = np.bincount(
+            flat_valid, weights=density_arr.ravel()[keep].astype(np.float64), minlength=n_indices
+        )
+        means = np.divide(sums, counts, out=np.full(n_indices, grey), where=counts > 0)
+    else:
+        means = np.full(n_indices, grey)
+
+    weights = (256.0 - means) ** density_strength
+    density_weights: dict[int, float] = {int(i): float(weights[i]) for i in unique}
+    for idx in ocean_terr_indices:
+        if idx in density_weights:
+            density_weights[idx] = 1.0
 
     land_alloc = _distribute(land_terrs, land_count, pixel_counts, density_weights)
     ocean_alloc = _distribute(ocean_terrs, ocean_count, pixel_counts, density_weights)
@@ -116,23 +136,40 @@ def generate_provinces(
                 terr.setdefault("province_ids", []).append(rid)
             start_index += 1
 
+    # Each territory covers a tiny fraction of the map, so subdivide it inside its
+    # own bounding box instead of across the full canvas. find_objects gives every
+    # territory's bounds in a single pass; labels are pmap + 1 because it ignores 0.
+    bboxes = find_objects(territory_pmap + 1)
+
     for terr, prov_count in all_terrs:
-        terr_mask = territory_pmap == terr["_pmap_index"]
+        terr_index = terr["_pmap_index"]
         ptype = terr["territory_type"]
         tid = terr["territory_id"]
 
+        box = bboxes[terr_index] if terr_index < len(bboxes) else None
+        if box is None:
+            step(1)
+            continue
+
+        y0, x0 = box[0].start, box[1].start
+        sub_terr = territory_pmap[box]
+        sub_boundary = boundary_mask[box]
+
+        terr_mask = sub_terr == terr_index
+
         if lake_mask is not None:
-            terr_fill = terr_mask & ~lake_mask & ~boundary_mask
-            terr_border = (terr_mask & boundary_mask) | (terr_mask & lake_mask)
+            sub_lake = lake_mask[box]
+            terr_fill = terr_mask & ~sub_lake & ~sub_boundary
+            terr_border = (terr_mask & sub_boundary) | (terr_mask & sub_lake)
         else:
-            terr_fill = terr_mask & ~boundary_mask
-            terr_border = terr_mask & boundary_mask
+            terr_fill = terr_mask & ~sub_boundary
+            terr_border = terr_mask & sub_boundary
 
         if exclude_ocean_density and ptype == "ocean":
             terr_density = None
             terr_density_strength = 1.0
         else:
-            terr_density = density_arr
+            terr_density = density_arr[box] if density_arr is not None else None
             terr_density_strength = density_strength
 
         jagged = jagged_land if ptype == "land" else jagged_ocean
@@ -150,11 +187,15 @@ def generate_provinces(
             jagged=jagged,
         )
 
+        # Centroids come back in crop-local coordinates.
         for m in meta:
             m["territory_id"] = tid
+            m["x"] += x0
+            m["y"] += y0
 
-        valid = (pmap >= 0) & (province_pmap < 0)
-        province_pmap[valid] = pmap[valid]
+        target = province_pmap[box]
+        valid = (pmap >= 0) & (target < 0)
+        target[valid] = pmap[valid]
 
         existing = terr.get("province_ids", [])
         terr["province_ids"] = existing + [m["province_id"] for m in meta]

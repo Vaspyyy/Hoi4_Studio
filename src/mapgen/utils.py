@@ -4,7 +4,12 @@ from typing import Callable
 
 import numpy as np
 from PIL import Image
-from scipy.ndimage import binary_dilation, distance_transform_edt, label as ndlabel
+from scipy.ndimage import (
+    binary_dilation,
+    distance_transform_edt,
+    find_objects,
+    label as ndlabel,
+)
 from scipy.spatial import cKDTree
 
 from . import config
@@ -161,22 +166,48 @@ def _jitter_coords(
     return out
 
 
+def _pad_box(
+    box: tuple[slice, ...], shape: tuple[int, ...], amount: int = 1
+) -> tuple[slice, ...]:
+    """Grow a bounding box by `amount` pixels, clamped to the array bounds."""
+    return tuple(
+        slice(max(0, s.start - amount), min(dim, s.stop + amount))
+        for s, dim in zip(box, shape)
+    )
+
+
 def _remove_enclaves(pmap: np.ndarray, mask: np.ndarray) -> None:
     unique_ids = np.unique(pmap[mask])
     unique_ids = unique_ids[unique_ids >= 0]
+    if unique_ids.size == 0:
+        return
 
     cleared = np.zeros(pmap.shape, dtype=bool)
 
+    # Work inside each region's bounding box; a region touches a tiny slice of the
+    # map, so labelling the full canvas once per region is wasted work. Region ids
+    # are rebased to 1..n first — find_objects allocates a list as long as the
+    # largest label, and ids here carry a start_index offset that can be large.
+    base = int(unique_ids.min())
+    # ids below `base` (and the -1 sentinel) fall outside `mask` and are background here
+    labels = np.where(pmap >= base, pmap - base + 1, 0)
+    region_boxes = find_objects(labels)
+
     for rid in unique_ids:
-        region_mask = pmap == rid
+        box = region_boxes[rid - base] if rid - base < len(region_boxes) else None
+        if box is None:
+            continue
+
+        sub_pmap = pmap[box]
+        region_mask = sub_pmap == rid
         labeled, n = ndlabel(region_mask)
         if n <= 1:
             continue
         comp_sizes = np.bincount(labeled.ravel())[1:]
         largest = comp_sizes.argmax() + 1
         small = region_mask & (labeled != largest)
-        pmap[small] = -1
-        cleared |= small
+        sub_pmap[small] = -1
+        cleared[box] |= small
 
     if cleared.any() and (pmap >= 0).any():
         # reassign each cleared fragment to the neighbouring territory
@@ -184,13 +215,21 @@ def _remove_enclaves(pmap: np.ndarray, mask: np.ndarray) -> None:
         # (was: Euclidean distance_transform_edt ; that could reassign
         #  a fragment back to the SAME territory across a water barrier.)
         cleared_labels, n_frags = ndlabel(cleared & mask)
+        frag_boxes = find_objects(cleared_labels)
         for cl in range(1, n_frags + 1):
-            frag = cleared_labels == cl
+            box = frag_boxes[cl - 1]
+            if box is None:
+                continue
+            # pad by 1 so the dilation can see across the fragment's edge
+            box = _pad_box(box, pmap.shape)
+
+            sub_pmap = pmap[box]
+            frag = cleared_labels[box] == cl
             dilated = binary_dilation(frag)
-            neighbours = dilated & (pmap >= 0) & mask
-            nbr_ids, nbr_counts = np.unique(pmap[neighbours], return_counts=True)
+            neighbours = dilated & (sub_pmap >= 0) & mask[box]
+            nbr_ids, nbr_counts = np.unique(sub_pmap[neighbours], return_counts=True)
             if len(nbr_ids) > 0:
-                pmap[frag] = nbr_ids[nbr_counts.argmax()]
+                sub_pmap[frag] = nbr_ids[nbr_counts.argmax()]
 
 
 def assign_regions(
